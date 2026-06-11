@@ -1,0 +1,53 @@
+{
+  "plugin": {
+    "name": "many-ai",
+    "description": "Converse com uma IA via Groq API"
+  },
+  "commands": {},
+  "errors": {
+    "generic": "Ops! Algo deu errado.",
+    "apiError": "Erro na API Groq: {{error}}",
+    "memoryReadError": "Erro ao ler memória",
+    "memoryWriteError": "Erro ao salvar na memória: {{error}}"
+  },
+  "memory": {
+    "dbOpened": "Banco de memória aberto",
+    "insertSuccess": "Memória salva",
+    "saved": "Memória salva com sucesso",
+    "readError": "Falha ao ler memória",
+    "writeError": "Falha ao salvar memória",
+    "dbOpenError": "Erro ao abrir banco de memória: {{error}}", 
+    "walError": "Erro ao ativar WAL mode: {{error}}",
+    "tableCreateError": "Erro ao criar tabela de memória: {{error}}",
+    "insertError": "Falha ao salvar memória: {{error}}",
+    "selectError": "Falha ao consultar memória: {{error}}",
+    "noResults": "Nenhum resultado encontrado."
+  },
+  "logs": {
+    "historyStart": "Iniciando resolveReply, histórico tem {{count}} msgs",
+    "historyUsing": "Usando {{count}} msgs de contexto",
+    "groqResponse": "Groq retornou:",
+    "commandDetected": "Detectado {{command}}: {{arg}}",
+    "searchExecuting": "SEARCH({{query}})",
+    "memoryReadExecuting": "MEM_READ({{query}})",
+    "memoryWriteExecuting": "MEM_WRITE({{arg}})",
+    "memoryWriteSuccess": "memWrite retornou:",
+    "memoryWriteError": "MEM_WRITE erro:",
+    "maxIterationsReached": "resolveReply: max iterações alcançadas sem MSG",
+    "commandAdded": "Comando adicionado ao contexto: {{cmd}}",
+    "historyLength": "Histórico {{chatId}}: {{count}} msgs",
+    "shouldRespond": {
+      "mention": "Respondendo → menção explícita",
+      "replyToMessage": "Respondendo → reply_to_message",
+      "atIdInText": "Respondendo → @ID no texto",
+      "quotedMessage": "Respondendo → mensagem citada do bot",
+      "quotedMessageOther": "Mensagem citada de outro → silencioso",
+      "quotedError": "Erro ao pegar quoted → silencioso",
+      "triggerPhrase": "Respondendo → trigger phrase: \"{{phrase}}\"",
+      "noCondition": "Sem condição atendida → silencioso",
+      "privateChat": "Mensagem privada → responde",
+      "noBotId": "api.client.user não definido → silencioso"
+    },
+    "noMediaResponse": "Só entendo mensagens de texto. Ainda não consigo ler imagens, figurinhas, áudio ou vídeos."
+  }
+}

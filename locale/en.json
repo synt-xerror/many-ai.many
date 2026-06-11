@@ -1,0 +1,53 @@
+{
+  "plugin": {
+    "name": "many-ai",
+    "description": "Chat with an AI through Groq API"
+  },
+  "commands": {},
+  "errors": {
+    "generic": "Oops! Something went wrong.",
+    "apiError": "Groq API error: {{error}}",
+    "memoryReadError": "Error reading memory",
+    "memoryWriteError": "Error saving to memory: {{error}}"
+  },
+  "memory": {
+    "dbOpened": "Memory database opened",
+    "insertSuccess": "Memory saved",
+    "saved": "Memory saved successfully",
+    "readError": "Failed to read memory",
+    "writeError": "Failed to save memory",
+    "dbOpenError": "Error opening memory database: {{error}}",
+    "walError": "Failed to enable WAL mode: {{error}}",
+    "tableCreateError": "Failed to create memory table: {{error}}",
+    "insertError": "Failed to save memory: {{error}}",
+    "selectError": "Failed to query memory: {{error}}",
+    "noResults": "No results found."
+  },
+  "logs": {
+    "historyStart": "Starting resolveReply, history has {{count}} messages",
+    "historyUsing": "Using {{count}} messages from context",
+    "groqResponse": "Groq returned:",
+    "commandDetected": "Detected {{command}}: {{arg}}",
+    "searchExecuting": "SEARCH({{query}})",
+    "memoryReadExecuting": "MEM_READ({{query}})",
+    "memoryWriteExecuting": "MEM_WRITE({{arg}})",
+    "memoryWriteSuccess": "memWrite returned:",
+    "memoryWriteError": "MEM_WRITE error:",
+    "maxIterationsReached": "resolveReply: max iterations reached without MSG",
+    "commandAdded": "Command added to context:",
+    "historyLength": "History for {{chatId}}: {{count}} messages",
+    "shouldRespond": {
+      "mention": "Responding → explicit mention",
+      "replyToMessage": "Responding → reply_to_message",
+      "atIdInText": "Responding → @ID in text",
+      "quotedMessage": "Responding → quoted message from bot",
+      "quotedMessageOther": "Quoted message from other → silent",
+      "quotedError": "Error getting quoted message → silent",
+      "triggerPhrase": "Responding → trigger phrase: \"{{phrase}}\"",
+      "noCondition": "No condition met → silent",
+      "privateChat": "Private message → respond",
+      "noBotId": "api.client.user not defined → silent"
+    },
+    "noMediaResponse": "I only understand text messages. I can't read images, stickers, audio or videos yet."
+  }
+}

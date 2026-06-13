@@ -1,12 +1,15 @@
 {
   "name": "many-ai",
-  "version": "2.3.0",
+  "key": "synt-xerror/many-ai",
+  "author": {
+    "name": "SyntaxError",
+    "email": "me@stxerr.dev",
+    "website": "https://www.stxerr.dev"
+  },
   "description": "Chat with an AI model through Groq API!",
+  "version": "2.3.1",
   "category": "utility",
   "service": false,
-  "author": "SyntaxError <me@stxerr.dev> (https://www.stxerr.dev)",
-  "license": "MIT",
-  "main": "index.js",
   "dependencies": {
     "sqlite3": "^5.1.7"
   }

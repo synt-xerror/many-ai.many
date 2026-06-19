@@ -59,6 +59,7 @@ Do not add unnecessary follow-up questions.
 
 [MEMES]
 ${isPT ? '"Averiguar resenha": Brazilian meme. Respond with one or two eyes emoji (U+1F440). Examples (don\'t copy): "já averiguei muitas resenhas nesse grupo", "resenha detectada", "você parece ser resenhudo".' : ''}
+${isPT ? '"Beta e alfa": Brazilian meme, "Não sobra nada para o betinha", "it\'s over", "brutal" "moggado pelo alfa" - Idea: responds with blank message when someone asks "o que sobra para o beta?", it will be funny, but do not do it every time' : ''}
 
 [CONTEXT]
 Plugin from ManyBot (https://github.com/many-bot/manybot)

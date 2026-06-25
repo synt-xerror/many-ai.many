@@ -1,11 +1,8 @@
-// src/plugins/many-ai/index.js
-// ManyBot AI plugin — responde, pesquisa e gerencia memória
+import { doSearch }                          from "./search.js";
+import { memRead, memWrite, initMemory }     from "./memory.js";
+import { buildSystemPrompt }                 from "./prompt.js";
 
-import { doSearch }          from "./search.js";
-import { memRead, memWrite, initMemory } from "./memory.js";
-import { buildSystemPrompt } from "./prompt.js";
-
-const histories = new Map();
+const histories    = new Map();
 const aiMessageIds = new Set();
 
 const MAX_HISTORY      = 20;
@@ -19,71 +16,56 @@ function getHistory(chatId) {
 }
 
 function trimHistory(history) {
-  if (history.length > MAX_HISTORY) {
+  if (history.length > MAX_HISTORY)
     history.splice(0, history.length - MAX_HISTORY);
-  }
 }
 
 async function callGroq(history, systemPrompt, apiKey) {
   const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type":  "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-    },
+    method:  "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model:    MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...history.slice(-MAX_HISTORY_SEND),
-      ],
+      model:      MODEL,
+      messages:   [{ role: "system", content: systemPrompt }, ...history.slice(-MAX_HISTORY_SEND)],
       max_tokens: MAX_TOKENS,
     }),
   });
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Groq API error ${res.status}: ${err}`);
-  }
-
-  const data = await res.json();
-  return data.choices[0].message.content.trim();
+  if (!res.ok) throw new Error(`Groq API error ${res.status}: ${await res.text()}`);
+  return (await res.json()).choices[0].message.content.trim();
 }
 
 function parseReply(reply) {
-  const searchMatch = reply.match(/^SEARCH\((.+)\)$/);
-  if (searchMatch) return { type: "command", command: "SEARCH", arg: searchMatch[1] };
+  const search   = reply.match(/^SEARCH\((.+)\)$/);
+  if (search)   return { type: "command", command: "SEARCH",    arg: search[1] };
 
-  const memReadMatch = reply.match(/^MEM_READ\((.+)\)$/);
-  if (memReadMatch) return { type: "command", command: "MEM_READ", arg: memReadMatch[1] };
+  const memRead  = reply.match(/^MEM_READ\((.+)\)$/);
+  if (memRead)  return { type: "command", command: "MEM_READ",  arg: memRead[1] };
 
-  const memWriteMatch = reply.match(/^MEM_WRITE\((.+)\)$/);
-  if (memWriteMatch) return { type: "command", command: "MEM_WRITE", arg: memWriteMatch[1] };
+  const memWrite = reply.match(/^MEM_WRITE\((.+)\)$/);
+  if (memWrite) return { type: "command", command: "MEM_WRITE", arg: memWrite[1] };
 
-  const msgMatch = reply.match(/^MSG:"([\s\S]+)"$/);
-  if (msgMatch) {
-    const value = msgMatch[1].trim();
-    if (!value) return { type: "silent" };
-    return { type: "msg", value };
+  const msg = reply.match(/^MSG:"([\s\S]+)"$/);
+  if (msg) {
+    const value = msg[1].trim();
+    return value ? { type: "msg", value } : { type: "silent" };
   }
 
   if (reply && !reply.startsWith("OUT:")) return { type: "msg", value: reply };
-
   return { type: "silent" };
 }
 
 async function resolveReply(history, systemPrompt, ctx, t, maxIterations = 5) {
-  const groqKey    = ctx.config.get("GROQ_API_KEY");
-  const tavilyKey  = ctx.config.get("TAVILY_API_KEY");
-  const serperKey  = ctx.config.get("SERPER_API_KEY");
+  const groqKey   = ctx.config.get("GROQ_API_KEY");
+  const tavilyKey = ctx.config.get("TAVILY_API_KEY");
+  const serperKey = ctx.config.get("SERPER_API_KEY");
 
   for (let i = 0; i < maxIterations; i++) {
-    const raw = await callGroq(history, systemPrompt, groqKey);
+    const raw    = await callGroq(history, systemPrompt, groqKey);
     history.push({ role: "assistant", content: raw });
     trimHistory(history);
 
     const parsed = parseReply(raw);
-
     if (parsed.type === "msg")    return parsed.value;
     if (parsed.type === "silent") return null;
 
@@ -120,11 +102,8 @@ async function resolveReply(history, systemPrompt, ctx, t, maxIterations = 5) {
   return null;
 }
 
-async function shouldRespond(msg, ctx, t, prefix) {
-  if (msg.is(prefix + "ai")) {
-    ctx.log.info(t("logs.shouldRespond.mention"));
-    return true;
-  }
+async function shouldRespond(msg, ctx, t, triggers) {
+  if (msg.is("ai") || triggers.some(tr => msg.body.trim().toLowerCase().includes(tr.toLowerCase()))) return true;
 
   if (msg.hasReply) {
     try {
@@ -139,50 +118,45 @@ async function shouldRespond(msg, ctx, t, prefix) {
 }
 
 export default async function (ctx) {
-  const { msg } = ctx;
-  const { t }   = ctx.i18n.createT(import.meta.url);
-  const prefix  = ctx.config.get("CMD_PREFIX");
-  const lang    = ctx.config.get("LANGUAGE", "pt");
+  const { msg, chat, config, i18n, log } = ctx;
+  const { t }      = i18n.createT(import.meta.url);
+  const lang       = config.get("LANGUAGE", "pt");
+  const triggers   = config.get("MANYAI_TRIGGERS", []);
 
   initMemory(ctx);
 
-  const chatId  = ctx.chat.id;
+  const chatId  = chat.id;
   const history = getHistory(chatId);
   const now     = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 15);
 
   const mediaTypes = ["img", "sticker", "audio", "video", "document", "voice", "gif"];
-  const msgType    = (msg.type || "").toLowerCase();
-  if (mediaTypes.includes(msgType)) {
-    if (await shouldRespond(msg, ctx, t, prefix)) {
-      await msg.reply(t("logs.noMediaResponse"));
-    }
+  if (mediaTypes.includes((msg.type || "").toLowerCase())) {
+    if (await shouldRespond(msg, ctx, t, triggers))
+      await msg.reply.text(t("logs.noMediaResponse"));
     return;
   }
 
   const body = msg.body || "";
-
-  if (body.trim().startsWith(prefix)) {
-    const formatted = `command|${msg.senderName}|${now}|${body}`;
-    history.push({ role: "system", content: formatted });
+  if (body.trim().startsWith(config.get("CMD_PREFIX"))) {
+    history.push({ role: "system", content: `command|${msg.senderName}|${now}|${body}` });
   } else {
-    const chatType  = ctx.chat.isGroup ? "group" : "private";
-    const formatted = `${chatType}|member|${msg.senderName}|${now}|${body}`;
-    history.push({ role: "user", content: formatted });
+    const chatType = chat.isGroup ? "group" : "private";
+    history.push({ role: "user", content: `${chatType}|member|${msg.senderName}|${now}|${body}` });
   }
   trimHistory(history);
 
-  if (!(await shouldRespond(msg, ctx, t, prefix))) return;
+  if (!(await shouldRespond(msg, ctx, t, triggers))) return;
 
   const systemPrompt = buildSystemPrompt(lang);
 
   try {
     const reply = await resolveReply(history, systemPrompt, ctx, t);
     if (reply) {
-      const sent = await msg.reply(reply);
+      const sent = await msg.reply.text(reply);
       if (sent?.id) aiMessageIds.add(sent.id);
     }
   } catch (err) {
-    ctx.log.error(`[many-ai] erro: ${err.message}`);
-    await msg.reply(t("errors.generic"));
+    log.error(`[many-ai] erro: ${err.message}`);
+    await msg.reply.text(t("errors.generic"));
   }
 }

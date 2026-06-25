@@ -7,7 +7,7 @@
     "website": "https://www.stxerr.dev"
   },
   "description": "Chat with an AI model through Groq API!",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "license": "MIT",
   "repo": "https://github.com/synt-xerror/many-ai.many",
   "category": "utility",

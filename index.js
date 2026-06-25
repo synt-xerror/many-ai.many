@@ -7,7 +7,7 @@ const aiMessageIds = new Set();
 
 function buildWordTriggerRE(words) {
   if (!words?.length) return null;
-  return new RegExp(`\\b(${words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`, "i");
+  return new RegExp(`(?<!\\S)\\b(${words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`, "i");
 }
 
 const MAX_HISTORY      = 20;
@@ -124,6 +124,8 @@ async function shouldRespond(msg, ctx, t, triggers, wordRE) {
 
 export default async function (ctx) {
   const { msg, chat, config, i18n, log } = ctx;
+  if (msg.fromMe) return;
+
   const { t }      = i18n.createT(import.meta.url);
   const lang         = config.get("LANGUAGE", "pt");
   const triggers     = config.get("MANYAI_TRIGGERS", []);

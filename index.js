@@ -5,6 +5,11 @@ import { buildSystemPrompt }                 from "./prompt.js";
 const histories    = new Map();
 const aiMessageIds = new Set();
 
+function buildWordTriggerRE(words) {
+  if (!words?.length) return null;
+  return new RegExp(`\\b(${words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\b`, "i");
+}
+
 const MAX_HISTORY      = 20;
 const MAX_HISTORY_SEND = 10;
 const MAX_TOKENS       = 150;
@@ -102,8 +107,8 @@ async function resolveReply(history, systemPrompt, ctx, t, maxIterations = 5) {
   return null;
 }
 
-async function shouldRespond(msg, ctx, t, triggers) {
-  if (msg.is("ai") || triggers.some(tr => msg.body.trim().toLowerCase().includes(tr.toLowerCase()))) return true;
+async function shouldRespond(msg, ctx, t, triggers, wordRE) {
+  if (msg.is("ai") || (wordRE?.test(msg.body)) || triggers.some(tr => msg.body.trim().toLowerCase().includes(tr.toLowerCase()))) return true;
 
   if (msg.hasReply) {
     try {
@@ -120,8 +125,10 @@ async function shouldRespond(msg, ctx, t, triggers) {
 export default async function (ctx) {
   const { msg, chat, config, i18n, log } = ctx;
   const { t }      = i18n.createT(import.meta.url);
-  const lang       = config.get("LANGUAGE", "pt");
-  const triggers   = config.get("MANYAI_TRIGGERS", []);
+  const lang         = config.get("LANGUAGE", "pt");
+  const triggers     = config.get("MANYAI_TRIGGERS", []);
+  const wordTriggers = config.get("MANYAI_WORD_TRIGGERS", ["many"]);
+  const wordRE       = buildWordTriggerRE(wordTriggers);
 
   initMemory(ctx);
 
@@ -131,12 +138,13 @@ export default async function (ctx) {
 
   const mediaTypes = ["img", "sticker", "audio", "video", "document", "voice", "gif"];
   if (mediaTypes.includes((msg.type || "").toLowerCase())) {
-    if (await shouldRespond(msg, ctx, t, triggers))
+    if (await shouldRespond(msg, ctx, t, triggers, wordRE))
       await msg.reply.text(t("logs.noMediaResponse"));
     return;
   }
 
-  const body = msg.body || "";
+  const body  = msg.body || "";
+
   if (body.trim().startsWith(config.get("CMD_PREFIX"))) {
     history.push({ role: "system", content: `command|${msg.senderName}|${now}|${body}` });
   } else {
@@ -145,7 +153,7 @@ export default async function (ctx) {
   }
   trimHistory(history);
 
-  if (!(await shouldRespond(msg, ctx, t, triggers))) return;
+  if (!(await shouldRespond(msg, ctx, t, triggers, wordRE))) return;
 
   const systemPrompt = buildSystemPrompt(lang);
 

@@ -12,9 +12,5 @@
   "repo": "https://github.com/synt-xerror/many-ai.many",
   "category": "utility",
   "service": false,
-  "dependencies": {
-    "sqlite3": "^5.1.7",
-    "baileys": "^6.7.9",
-    "wa-sticker-formatter": "^4.4.4"
-  }
+  "dependencies": {}
 }

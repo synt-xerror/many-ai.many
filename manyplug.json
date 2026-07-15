@@ -6,13 +6,15 @@
     "email": "me@stxerr.dev",
     "website": "https://www.stxerr.dev"
   },
-  "description": "Chat with an AI model through Groq API!",
-  "version": "3.2.1",
+  "description": "Fully configurable AI agent for WhatsApp via Groq — no hardcoded persona, multi API key failover, web search, per-chat memory and more.",
+  "version": "5.4.0",
   "license": "MIT",
   "repo": "https://github.com/synt-xerror/many-ai.many",
   "category": "utility",
   "service": false,
   "dependencies": {
-    "sqlite3": "^5.1.7"
+    "sqlite3": "^5.1.7",
+    "baileys": "^6.7.9",
+    "wa-sticker-formatter": "^4.4.4"
   }
 }

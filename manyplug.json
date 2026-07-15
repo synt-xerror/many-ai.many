@@ -7,7 +7,7 @@
     "website": "https://www.stxerr.dev"
   },
   "description": "Fully configurable AI agent for WhatsApp via Groq — no hardcoded persona, multi API key failover, web search, per-chat memory and more.",
-  "version": "5.4.0",
+  "version": "3.3.0",
   "license": "MIT",
   "repo": "https://github.com/synt-xerror/many-ai.many",
   "category": "utility",

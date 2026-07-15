@@ -1,0 +1,60 @@
+{
+  "plugin": {
+    "name": "many-ai",
+    "description": "Chatea con una IA vía Groq API, con búsqueda, memoria y herramientas extra"
+  },
+  "commands": {},
+  "errors": {
+    "generic": "¡Ups! Algo salió mal.",
+    "apiError": "Error en la API de Groq: {{error}}",
+    "missingApiKey": "Mi clave de la API de Groq no está configurada. Pídele al admin del bot que configure GROQ_API_KEY en ~/.manybot/manybot.toml.",
+    "toolError": "Hubo un error al intentar usar {{tool}}.",
+    "rateLimit": "Se alcanzó el límite de uso, intenta de nuevo en un momento.",
+    "rateLimitWithRetry": "Se alcanzó el límite de uso. Intenta de nuevo en {{retryIn}}.",
+    "allKeysRateLimit": "Ninguna de las claves de API configuradas está funcionando ahora (límite de uso, clave inválida o inestabilidad de Groq). Intenta de nuevo en un momento."
+  },
+  "memory": {
+    "dbOpened": "Base de datos de memoria abierta",
+    "saved": "Memoria guardada con éxito",
+    "dbOpenError": "Error al abrir la base de datos de memoria: {{error}}",
+    "walError": "Error al activar el modo WAL: {{error}}",
+    "tableCreateError": "Error al crear la tabla de memoria: {{error}}",
+    "insertError": "Fallo al guardar memoria: {{error}}",
+    "selectError": "Fallo al consultar memoria: {{error}}",
+    "noResults": "No se encontraron resultados."
+  },
+  "tools": {
+    "resultLabel": "Resultado",
+    "stickerSent": "Sticker enviado.",
+    "stickerNotFound": "No encontré ningún sticker llamado \"{{name}}\"."
+  },
+  "settings": {
+    "adminOnly": "Solo los admins del grupo pueden cambiar estas configuraciones.",
+    "disabled": "IA desactivada en este chat. Envía \"!ai-settings on\" para reactivarla.",
+    "enabled": "IA activada en este chat.",
+    "interventionOn": "Intervención pasiva activada — puedo intervenir en preguntas sin respuesta, pedidos de ayuda claros o correcciones, incluso sin ser llamada.",
+    "interventionOff": "Intervención pasiva desactivada — solo respondo cuando me llaman directamente.",
+    "interventionUsage": "Uso: \"!ai-settings intervention on\" o \"!ai-settings intervention off\".",
+    "status": "IA: {{enabled}} | Intervención pasiva: {{intervention}} | Transcripción de audio: {{transcribe}} | Stickers: {{sticker}}",
+    "saveError": "No pude guardar esa configuración — el almacenamiento de settings puede no estar disponible todavía.",
+    "transcribeOn": "Transcripción de audio en segundo plano activada — los audios de este chat se vuelven texto buscable.",
+    "transcribeOff": "Transcripción de audio en segundo plano desactivada. Responder a un audio específico preguntando sobre él sigue funcionando.",
+    "transcribeUsage": "Uso: \"!ai-settings transcribe on\" o \"!ai-settings transcribe off\".",
+    "stickerOn": "Stickers activados — puedo enviar uno cuando tenga sentido.",
+    "stickerOff": "Stickers desactivados — ya no voy a enviar ninguno.",
+    "stickerUsage": "Uso: \"!ai-settings sticker on\" o \"!ai-settings sticker off\".",
+    "yes": "activado",
+    "no": "desactivado"
+  },
+  "logs": {
+    "maxIterationsReached": "resolveReply: se alcanzó el máximo de iteraciones sin respuesta final",
+    "missingApiKeyWarning": "GROQ_API_KEY no configurada — Many no va a responder hasta que esto se configure en ~/.manybot/manybot.toml.",
+    "ready": "many-ai lista (modelo: {{model}}, {{count}} clave(s) de API configurada(s)).",
+    "shouldRespond": {
+      "quotedError": "Error al obtener mensaje citado → silencioso ({{error}})"
+    },
+    "noMediaResponse": "Solo entiendo mensajes de texto. Todavía no puedo leer imágenes, stickers, audio o videos.",
+    "transcriptionFailed": "No pude transcribir ese audio. Intenta de nuevo en un momento.",
+    "transcriptionDisabled": "Todavía no proceso audios en este chat. Actívalo con \"!ai-settings transcribe on\", o responde a un audio específico preguntando sobre él."
+  }
+}

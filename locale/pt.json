@@ -1,53 +1,60 @@
 {
   "plugin": {
     "name": "many-ai",
-    "description": "Converse com uma IA via Groq API"
+    "description": "Converse com uma IA via Groq API, com busca, memória e ferramentas extras"
   },
   "commands": {},
   "errors": {
     "generic": "Ops! Algo deu errado.",
     "apiError": "Erro na API Groq: {{error}}",
-    "memoryReadError": "Erro ao ler memória",
-    "memoryWriteError": "Erro ao salvar na memória: {{error}}"
+    "missingApiKey": "Minha chave da API Groq não está configurada. Peça pro admin do bot configurar GROQ_API_KEY em ~/.manybot/manybot.toml.",
+    "toolError": "Deu erro ao tentar usar {{tool}}.",
+    "rateLimit": "Rate limit atingido, tenta de novo daqui a pouco.",
+    "rateLimitWithRetry": "Rate limit atingido. Tenta de novo em {{retryIn}}.",
+    "allKeysRateLimit": "Nenhuma das chaves de API configuradas está funcionando agora (limite de uso, chave inválida ou instabilidade da Groq). Tenta de novo em um momento."
   },
   "memory": {
     "dbOpened": "Banco de memória aberto",
-    "insertSuccess": "Memória salva",
     "saved": "Memória salva com sucesso",
-    "readError": "Falha ao ler memória",
-    "writeError": "Falha ao salvar memória",
-    "dbOpenError": "Erro ao abrir banco de memória: {{error}}", 
+    "dbOpenError": "Erro ao abrir banco de memória: {{error}}",
     "walError": "Erro ao ativar WAL mode: {{error}}",
     "tableCreateError": "Erro ao criar tabela de memória: {{error}}",
     "insertError": "Falha ao salvar memória: {{error}}",
     "selectError": "Falha ao consultar memória: {{error}}",
     "noResults": "Nenhum resultado encontrado."
   },
+  "tools": {
+    "resultLabel": "Resultado",
+    "stickerSent": "Figurinha enviada.",
+    "stickerNotFound": "Não achei nenhuma figurinha chamada \"{{name}}\"."
+  },
+  "settings": {
+    "adminOnly": "Só admins do grupo podem mudar essas configurações.",
+    "disabled": "IA desativada neste chat. Manda \"!ai-settings on\" pra reativar.",
+    "enabled": "IA ativada neste chat.",
+    "interventionOn": "Intervenção passiva ativada — posso entrar em perguntas sem resposta, pedidos de ajuda claros ou correções, mesmo sem ser chamada.",
+    "interventionOff": "Intervenção passiva desativada — só respondo quando chamada diretamente.",
+    "interventionUsage": "Uso: \"!ai-settings intervention on\" ou \"!ai-settings intervention off\".",
+    "status": "IA: {{enabled}} | Intervenção passiva: {{intervention}} | Transcrição de áudio: {{transcribe}} | Figurinhas: {{sticker}}",
+    "saveError": "Não consegui salvar essa configuração — o armazenamento de settings pode não estar disponível ainda.",
+    "transcribeOn": "Transcrição de áudio em background ativada — os áudios desse chat viram texto pesquisável.",
+    "transcribeOff": "Transcrição de áudio em background desativada. Responder um áudio específico perguntando sobre ele continua funcionando.",
+    "transcribeUsage": "Uso: \"!ai-settings transcribe on\" ou \"!ai-settings transcribe off\".",
+    "yes": "ativado",
+    "no": "desativado",
+    "stickerOn": "Figurinhas ativadas — posso mandar uma quando fizer sentido.",
+    "stickerOff": "Figurinhas desativadas — não vou mais mandar nenhuma.",
+    "stickerUsage": "Uso: \"!ai-settings sticker on\" ou \"!ai-settings sticker off\"."
+  },
   "logs": {
-    "historyStart": "Iniciando resolveReply, histórico tem {{count}} msgs",
-    "historyUsing": "Usando {{count}} msgs de contexto",
-    "groqResponse": "Groq retornou:",
-    "commandDetected": "Detectado {{command}}: {{arg}}",
-    "searchExecuting": "SEARCH({{query}})",
-    "memoryReadExecuting": "MEM_READ({{query}})",
-    "memoryWriteExecuting": "MEM_WRITE({{arg}})",
-    "memoryWriteSuccess": "memWrite retornou:",
-    "memoryWriteError": "MEM_WRITE erro:",
-    "maxIterationsReached": "resolveReply: max iterações alcançadas sem MSG",
-    "commandAdded": "Comando adicionado ao contexto: {{cmd}}",
-    "historyLength": "Histórico {{chatId}}: {{count}} msgs",
+    "maxIterationsReached": "resolveReply: máximo de iterações alcançado sem resposta final",
+    "missingApiKeyWarning": "GROQ_API_KEY não configurada — a Many não vai responder até isso ser configurado em ~/.manybot/manybot.toml.",
+    "ready": "many-ai pronta (modelo: {{model}}, {{count}} chave(s) de API configurada(s)).",
     "shouldRespond": {
-      "mention": "Respondendo → menção explícita",
-      "replyToMessage": "Respondendo → reply_to_message",
-      "atIdInText": "Respondendo → @ID no texto",
-      "quotedMessage": "Respondendo → mensagem citada do bot",
-      "quotedMessageOther": "Mensagem citada de outro → silencioso",
-      "quotedError": "Erro ao pegar quoted → silencioso",
-      "triggerPhrase": "Respondendo → trigger phrase: \"{{phrase}}\"",
-      "noCondition": "Sem condição atendida → silencioso",
-      "privateChat": "Mensagem privada → responde",
-      "noBotId": "api.client.user não definido → silencioso"
+      "quotedError": "Erro ao pegar mensagem citada → silencioso ({{error}})"
     },
-    "noMediaResponse": "Só entendo mensagens de texto. Ainda não consigo ler imagens, figurinhas, áudio ou vídeos."
+    "noMediaResponse": "Só entendo mensagens de texto. Ainda não consigo ler imagens, figurinhas, áudio ou vídeos.",
+    "transcriptionFailed": "Não consegui transcrever esse áudio. Tenta de novo daqui a pouco.",
+    "transcriptionDisabled": "Ainda não processo áudios nesse chat. Ativa com \"!ai-settings transcribe on\", ou responde um áudio específico perguntando sobre ele."
   }
 }

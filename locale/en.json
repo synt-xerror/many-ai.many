@@ -1,53 +1,60 @@
 {
   "plugin": {
     "name": "many-ai",
-    "description": "Chat with an AI through Groq API"
+    "description": "Chat with an AI model through the Groq API, with search, memory, and extra tools"
   },
   "commands": {},
   "errors": {
     "generic": "Oops! Something went wrong.",
     "apiError": "Groq API error: {{error}}",
-    "memoryReadError": "Error reading memory",
-    "memoryWriteError": "Error saving to memory: {{error}}"
+    "missingApiKey": "My Groq API key isn't configured. Ask the bot admin to set GROQ_API_KEY in ~/.manybot/manybot.toml.",
+    "toolError": "Something went wrong trying to use {{tool}}.",
+    "rateLimit": "Rate limit reached, try again in a bit.",
+    "rateLimitWithRetry": "Rate limit reached. Try again in {{retryIn}}.",
+    "allKeysRateLimit": "None of the configured API keys are working right now (rate limit, invalid key, or a Groq hiccup). Try again in a moment."
   },
   "memory": {
     "dbOpened": "Memory database opened",
-    "insertSuccess": "Memory saved",
     "saved": "Memory saved successfully",
-    "readError": "Failed to read memory",
-    "writeError": "Failed to save memory",
     "dbOpenError": "Error opening memory database: {{error}}",
-    "walError": "Failed to enable WAL mode: {{error}}",
-    "tableCreateError": "Failed to create memory table: {{error}}",
+    "walError": "Error enabling WAL mode: {{error}}",
+    "tableCreateError": "Error creating memory table: {{error}}",
     "insertError": "Failed to save memory: {{error}}",
     "selectError": "Failed to query memory: {{error}}",
     "noResults": "No results found."
   },
+  "tools": {
+    "resultLabel": "Result",
+    "stickerSent": "Sticker sent.",
+    "stickerNotFound": "I couldn't find a sticker called \"{{name}}\"."
+  },
+  "settings": {
+    "adminOnly": "Only group admins can change these settings.",
+    "disabled": "AI disabled for this chat. Send \"!ai-settings on\" to re-enable.",
+    "enabled": "AI enabled for this chat.",
+    "interventionOn": "Passive intervention enabled — I may jump in on unanswered questions, clear help requests, or corrections, even without being called.",
+    "interventionOff": "Passive intervention disabled — I'll only respond when directly triggered.",
+    "interventionUsage": "Usage: \"!ai-settings intervention on\" or \"!ai-settings intervention off\".",
+    "status": "AI: {{enabled}} | Passive intervention: {{intervention}} | Audio transcription: {{transcribe}} | Stickers: {{sticker}}",
+    "saveError": "Couldn't save that setting — settings storage might not be available yet.",
+    "transcribeOn": "Background audio transcription enabled — voice notes in this chat become searchable text.",
+    "transcribeOff": "Background audio transcription disabled. Replying to a specific voice note to ask about it still works.",
+    "transcribeUsage": "Usage: \"!ai-settings transcribe on\" or \"!ai-settings transcribe off\".",
+    "yes": "on",
+    "no": "off",
+    "stickerOn": "Stickers enabled - I may send one when it fits.",
+    "stickerOff": "Stickers disabled - I won't send any anymore.",
+    "stickerUsage": "Usage: \"!ai-settings sticker on\" or \"!ai-settings sticker off\"."
+  },
   "logs": {
-    "historyStart": "Starting resolveReply, history has {{count}} messages",
-    "historyUsing": "Using {{count}} messages from context",
-    "groqResponse": "Groq returned:",
-    "commandDetected": "Detected {{command}}: {{arg}}",
-    "searchExecuting": "SEARCH({{query}})",
-    "memoryReadExecuting": "MEM_READ({{query}})",
-    "memoryWriteExecuting": "MEM_WRITE({{arg}})",
-    "memoryWriteSuccess": "memWrite returned:",
-    "memoryWriteError": "MEM_WRITE error:",
-    "maxIterationsReached": "resolveReply: max iterations reached without MSG",
-    "commandAdded": "Command added to context:",
-    "historyLength": "History for {{chatId}}: {{count}} messages",
+    "maxIterationsReached": "resolveReply: max iterations reached without a final reply",
+    "missingApiKeyWarning": "GROQ_API_KEY not configured — Many won't respond until this is set in ~/.manybot/manybot.toml.",
+    "ready": "many-ai ready (model: {{model}}, {{count}} API key(s) configured).",
     "shouldRespond": {
-      "mention": "Responding → explicit mention",
-      "replyToMessage": "Responding → reply_to_message",
-      "atIdInText": "Responding → @ID in text",
-      "quotedMessage": "Responding → quoted message from bot",
-      "quotedMessageOther": "Quoted message from other → silent",
-      "quotedError": "Error getting quoted message → silent",
-      "triggerPhrase": "Responding → trigger phrase: \"{{phrase}}\"",
-      "noCondition": "No condition met → silent",
-      "privateChat": "Private message → respond",
-      "noBotId": "api.client.user not defined → silent"
+      "quotedError": "Error fetching quoted message → staying silent ({{error}})"
     },
-    "noMediaResponse": "I only understand text messages. I can't read images, stickers, audio or videos yet."
+    "noMediaResponse": "I only understand text messages. I still can't read images, stickers, audio, or video.",
+    "transcriptionFailed": "I couldn't transcribe that audio. Try again in a bit.",
+    "transcriptionDisabled": "I don't process voice notes in this chat yet. Enable it with \"!ai-settings transcribe on\", or just reply to a specific one asking about it."
   }
 }

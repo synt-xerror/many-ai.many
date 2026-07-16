@@ -1,8 +1,9 @@
 // src/plugins/many-ai/ai-disclaimer.js
 // First-use / "it's been a while" disclaimer for the AI trigger path only.
-// Uses its own table (ai_seen_users), separate from many-help's db, so
-// "first time talking to the bot at all" and "first time using the AI"
-// don't get mixed up.
+// Uses its own table (ai_seen), separate from many-help's db, so "first
+// time talking to the bot at all" and "first time using the AI" don't get
+// mixed up. Tracked per GROUP in groups (any member triggering it counts —
+// it doesn't repeat for every new person) and per SENDER in DMs.
 //
 // Hard rule: nothing in this file may ever throw out of setupAiDisclaimer()
 // or maybeSendAiDisclaimer(). setup() in index.js has no try/catch around
@@ -64,8 +65,8 @@ function buildDisclaimer({ language, prefix, settingsCommand }) {
 function openDb(dbPath) {
   const db = new DatabaseSync(dbPath);
   db.exec(`
-    CREATE TABLE IF NOT EXISTS ai_seen_users (
-      sender     TEXT    PRIMARY KEY,
+    CREATE TABLE IF NOT EXISTS ai_seen (
+      seen_key   TEXT    PRIMARY KEY,
       first_seen INTEGER NOT NULL,
       last_seen  INTEGER NOT NULL DEFAULT 0
     )
@@ -74,20 +75,20 @@ function openDb(dbPath) {
 }
 
 function purgeInactive(db) {
-  db.prepare("DELETE FROM ai_seen_users WHERE last_seen > 0 AND last_seen < ?").run(Date.now() - INACTIVE_MS);
+  db.prepare("DELETE FROM ai_seen WHERE last_seen > 0 AND last_seen < ?").run(Date.now() - INACTIVE_MS);
 }
 
-function touchUser(db, sender) {
-  db.prepare("UPDATE ai_seen_users SET last_seen = ? WHERE sender = ?").run(Date.now(), sender);
+function touchKey(db, seenKey) {
+  db.prepare("UPDATE ai_seen SET last_seen = ? WHERE seen_key = ?").run(Date.now(), seenKey);
 }
 
 // true = genuinely the first time ever, OR the row had already been purged
 // for inactivity (in which case INSERT OR IGNORE recreates it and counts
 // as "new" again, on purpose).
-function isNewOrReturning(db, sender) {
+function isNewOrReturning(db, seenKey) {
   const { changes } = db
-    .prepare("INSERT OR IGNORE INTO ai_seen_users (sender, first_seen, last_seen) VALUES (?, ?, ?)")
-    .run(sender, Date.now(), Date.now());
+    .prepare("INSERT OR IGNORE INTO ai_seen (seen_key, first_seen, last_seen) VALUES (?, ?, ?)")
+    .run(seenKey, Date.now(), Date.now());
   return changes === 1;
 }
 
@@ -120,26 +121,27 @@ export function setupAiDisclaimer(ctx) {
  * Call this ONLY after the AI has actually resolved to a real reply (never
  * on SILENT, never on a failed/empty trigger, never on a passive-mode
  * reply nobody asked for). Sends a short "this is experimental AI" notice
- * right after the real reply, but only the first time a given sender
- * triggers the AI, or the first time again after 3 full days without
- * triggering it.
+ * right after the real reply — in a GROUP this is tracked per group (any
+ * member triggering it counts, so it doesn't repeat for every new person),
+ * in a DM it's tracked per sender. Either way it fires again after 3 full
+ * days without a trigger for that same key.
  *
  * Never throws — any failure (db op, or the reply itself failing to send)
  * is logged and swallowed so it can never mask a otherwise-successful AI
  * reply with an error message.
  */
 export async function maybeSendAiDisclaimer(ctx) {
-  const { msg, config } = ctx;
+  const { msg, chat, config } = ctx;
   if (!db) return;
 
-  const sender = msg?.sender;
-  if (!sender) return;
+  const seenKey = chat?.isGroup ? (chat.id ? `group:${chat.id}` : null) : (msg?.sender ? `dm:${msg.sender}` : null);
+  if (!seenKey) return;
 
   try {
     purgeInactive(db);
 
-    const isNew = isNewOrReturning(db, sender);
-    logRef?.info?.(`[many-ai:debug] disclaimer check sender="${sender}" isNewOrReturning=${isNew}`);
+    const isNew = isNewOrReturning(db, seenKey);
+    logRef?.info?.(`[many-ai:debug] disclaimer check key="${seenKey}" isNewOrReturning=${isNew}`);
     if (isNew) {
       const disclaimer = buildDisclaimer({
         language: config.get("LANGUAGE", "pt"),
@@ -148,7 +150,7 @@ export async function maybeSendAiDisclaimer(ctx) {
       });
       await msg.reply.text(disclaimer);
     } else {
-      touchUser(db, sender);
+      touchKey(db, seenKey);
     }
   } catch (err) {
     logError(`[many-ai] ai-disclaimer error, skipping: ${err.message}`);

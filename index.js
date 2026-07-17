@@ -39,7 +39,6 @@ async function getSetting(ctx, key, defaultValue) {
   try {
     const value = await ctx.settings?.get(key, defaultValue);
     const resolved = value === undefined || value === null ? defaultValue : value;
-    debugLog(ctx, `getSetting(${key}) = ${JSON.stringify(resolved)}`);
     return resolved;
   } catch (err) {
     ctx.log.error(`[many-ai] settings.get(${key}) failed, using default: ${err.message}`);
@@ -50,7 +49,6 @@ async function getSetting(ctx, key, defaultValue) {
 async function setSetting(ctx, key, value) {
   try {
     await ctx.settings?.set(key, value);
-    debugLog(ctx, `setSetting(${key}) = ${JSON.stringify(value)} OK`);
     return true;
   } catch (err) {
     ctx.log.error(`[many-ai] settings.set(${key}) failed: ${err.message}`);
@@ -67,15 +65,7 @@ async function setSetting(ctx, key, value) {
 async function getStickerPromptExtras(ctx) {
   const stickersEnabled = await getSetting(ctx, "stickersEnabled", true);
   const stickers = stickersEnabled ? await listStickers(ctx) : [];
-  if (stickersEnabled) {
-    console.log(`[many-ai:debug] stickers dir="${ctx.storage.resolve("stickers")}" found=${stickers.length}`);
-  }
   return { stickersEnabled, stickers };
-}
-
-/** Verbose step-by-step tracing for testing — always on, remove calls manually when done. */
-function debugLog(ctx, ...args) {
-  ctx.log.info("[many-ai:debug]", ...args);
 }
 
 function preview(text, len = 100) {
@@ -96,7 +86,7 @@ const MAX_HISTORY_SEND = 10;
 const DEFAULT_MAX_TOKENS = 300;
 const MAX_QUOTED_LEN     = 200;
 
-const KNOWN_COMMANDS = ["SEARCH", "SEARCH_HISTORY", "MEM_READ", "MEM_WRITE", "CALC", "GROUP_INFO", "STICKER"];
+const KNOWN_COMMANDS = ["SEARCH", "SEARCH_HISTORY", "MEM_READ", "MEM_WRITE", "CALC", "GROUP_INFO", "SEND_STICKER"];
 
 function buildWordTriggerRE(words) {
   if (!words?.length) return null;
@@ -311,9 +301,6 @@ async function callGroq(history, systemPrompt, apiKey, MODEL, maxTokens) {
   const data = await res.json();
   const choice = data.choices[0];
   const content = (choice.message.content || "").trim();
-  if (!content) {
-    console.log(`[many-ai:debug] empty model content, finish_reason="${choice.finish_reason}" native_tool_calls=${JSON.stringify(choice.message.tool_calls || null)}`);
-  }
   return content;
 }
 
@@ -339,7 +326,7 @@ export function parseReply(reply) {
 
   // A call on its own first line, followed by more text — e.g. the model
   // sends a sticker and adds a short reply right after it. Split it instead
-  // of leaking the raw "STICKER(...)" syntax to the user as plain text.
+  // of leaking the raw "SEND_STICKER(...)" syntax to the user as plain text.
   const newlineIdx = text.indexOf("\n");
   if (newlineIdx !== -1) {
     const firstLine = text.slice(0, newlineIdx).trim();
@@ -390,7 +377,7 @@ async function runTool(command, arg, ctx, chatId, t, opts) {
       return JSON.stringify(info);
     }
 
-    case "STICKER": {
+    case "SEND_STICKER": {
       try {
         const buffer = await buildStickerBuffer(ctx, arg, { pack: opts.stickerPack, author: opts.stickerAuthor });
         await ctx.send.sticker(buffer).rawPromise;
@@ -428,19 +415,16 @@ async function resolveReply(history, systemPrompt, ctx, t, MODEL, chatId, maxIte
       if (err.isRateLimit || err.isInvalidKey || err.isTransient || err.isMissingKey) return t("errors.allKeysRateLimit");
       throw err;
     }
-    debugLog(ctx, `model raw output (iter ${i}): "${preview(raw)}"`);
 
     pushEntry(history, { role: "assistant", kind: "tool", content: raw });
 
     const parsed = parseReply(raw);
-    if (parsed.type === "msg")    { debugLog(ctx, "-> final text reply"); return parsed.value; }
-    if (parsed.type === "silent") { debugLog(ctx, "-> SILENT"); return null; }
+    if (parsed.type === "msg")    return parsed.value;
+    if (parsed.type === "silent") return null;
 
-    debugLog(ctx, `-> tool call: ${parsed.command}(${preview(parsed.arg, 60)})`);
     let result;
     try {
       result = await runTool(parsed.command, parsed.arg, ctx, chatId, t, opts);
-      debugLog(ctx, `-> tool result: "${preview(result, 150)}"`);
     } catch (err) {
       ctx.log.error(`[many-ai] error in ${parsed.command}: ${err.message}`);
       result = t("errors.toolError", { tool: parsed.command });
@@ -452,8 +436,7 @@ async function resolveReply(history, systemPrompt, ctx, t, MODEL, chatId, maxIte
     // the model needs the result of before continuing — if it also wrote a
     // reply right after the call on the same turn, that's the final answer,
     // no need to spend another API call asking for it again.
-    if (parsed.command === "STICKER" && parsed.trailing) {
-      debugLog(ctx, "-> sticker + trailing text, using trailing as final reply");
+    if (parsed.command === "SEND_STICKER" && parsed.trailing) {
       return parsed.trailing;
     }
   }
@@ -498,11 +481,9 @@ function markContinuation(chatId, senderName) {
  */
 async function handleSettingsCommand(ctx, args, t) {
   const sub = (args[0] || "status").toLowerCase();
-  debugLog(ctx, `handleSettingsCommand: sub="${sub}" args=${JSON.stringify(args)}`);
 
   if (ctx.chat.isGroup && sub !== "status") {
     const isAdmin = await ctx.chat.isSenderAdmin();
-    debugLog(ctx, `handleSettingsCommand: isSenderAdmin=${isAdmin}`);
     if (!isAdmin) {
       await ctx.msg.reply.text(t("settings.adminOnly"));
       return;
@@ -561,7 +542,7 @@ async function handleSettingsCommand(ctx, args, t) {
   }
 
   const enabled      = await getSetting(ctx, "enabled", true);
-  const intervention = await getSetting(ctx, "passiveIntervention", true);
+  const intervention = await getSetting(ctx, "passiveIntervention", false);
   const transcribe   = await getSetting(ctx, "transcribeAudio", true);
   const stickerOn    = await getSetting(ctx, "stickersEnabled", true);
   await ctx.msg.reply.text(t("settings.status", {
@@ -583,13 +564,12 @@ async function handleSettingsCommand(ctx, args, t) {
 async function runPassiveCheck(ctx, chatId, history, t, senderName, { dm = false } = {}) {
   // Re-check here, not just at the call site — a pending setTimeout could
   // fire after the setting was flipped off in the meantime.
-  const passiveOn = await getSetting(ctx, "passiveIntervention", true);
-  if (!passiveOn) { debugLog(ctx, "runPassiveCheck: intervention turned off mid-flight, aborting"); return; }
+  const passiveOn = await getSetting(ctx, "passiveIntervention", false);
+  if (!passiveOn) return;
 
   const { config } = ctx;
   const lang         = config.get("LANGUAGE", "pt");
   const passiveModel = config.get("AI_PASSIVE_MODEL", "llama-3.1-8b-instant");
-  debugLog(ctx, `runPassiveCheck: calling model ${passiveModel} (dm=${dm})`);
 
   const { stickersEnabled, stickers } = await getStickerPromptExtras(ctx);
   const basePrompt = buildSystemPrompt({
@@ -623,9 +603,8 @@ async function runPassiveCheck(ctx, chatId, history, t, senderName, { dm = false
     // prompts are built from. Only an actual contribution gets recorded back.
     const scratch = history.slice();
     const reply = await withChatLock(chatId, () => resolveReply(scratch, basePrompt + passiveNote, ctx, t, passiveModel, chatId, 3));
-    if (!reply) { debugLog(ctx, "runPassiveCheck: result = SILENT"); return; }
+    if (!reply) return;
 
-    debugLog(ctx, `runPassiveCheck: result = REPLY "${preview(reply)}"`);
     pushEntry(history, { role: "assistant", kind: "tool", content: reply });
     const handle  = ctx.send.text(reply); // unprompted — nothing to quote
     const rawSent = await handle.rawPromise;
@@ -644,12 +623,10 @@ async function runPassiveCheck(ctx, chatId, history, t, senderName, { dm = false
  * (dm: true) is what keeps it from replying to every little thing.
  */
 async function maybeInterveneInDM(ctx, chatId, history, body, t, senderName) {
-  const passiveOn = await getSetting(ctx, "passiveIntervention", true);
+  const passiveOn = await getSetting(ctx, "passiveIntervention", false);
   if (!passiveOn || isTooShortToConsider(body)) {
-    debugLog(ctx, `maybeInterveneInDM: skipped (passiveOn=${passiveOn}, tooShort=${isTooShortToConsider(body)})`);
     return;
   }
-  debugLog(ctx, "maybeInterveneInDM: checking now");
   await runPassiveCheck(ctx, chatId, history, t, senderName, { dm: true });
 }
 
@@ -659,9 +636,8 @@ async function maybeInterveneInDM(ctx, chatId, history, body, t, senderName) {
  * spending an API call on every single message in an active group.
  */
 async function maybeIntervenePassively(ctx, chatId, history, body, t, senderName) {
-  const passiveOn = await getSetting(ctx, "passiveIntervention", true);
+  const passiveOn = await getSetting(ctx, "passiveIntervention", false);
   if (!passiveOn || isTooShortToConsider(body)) {
-    debugLog(ctx, `maybeIntervenePassively: skipped (passiveOn=${passiveOn}, tooShort=${isTooShortToConsider(body)})`);
     return;
   }
 
@@ -670,22 +646,17 @@ async function maybeIntervenePassively(ctx, chatId, history, body, t, senderName
   if (looksLikeUnansweredQuestion(body)) {
     const waitMinutes = Number(ctx.config.get("AI_INTERVENTION_WAIT_MINUTES", 1)) || 1;
     const snapshot = lastActivityAt.get(chatId);
-    debugLog(ctx, `maybeIntervenePassively: looks like an unanswered question, waiting ${waitMinutes}min`);
     setTimeout(() => {
       // Someone else spoke in this chat since — the question may already
       // be answered, or the moment has passed. Stay out of it.
-      if (lastActivityAt.get(chatId) !== snapshot) { debugLog(ctx, "maybeIntervenePassively: chat had activity since, aborting delayed check"); return; }
-      debugLog(ctx, "maybeIntervenePassively: running delayed check now");
+      if (lastActivityAt.get(chatId) !== snapshot) return;
       runPassiveCheck(ctx, chatId, history, t, senderName).catch(err => ctx.log.error(`[many-ai] delayed passive check error: ${err.message}`));
     }, waitMinutes * 60_000);
     return;
   }
 
   if (looksLikeHelpRequest(body, lang)) {
-    debugLog(ctx, "maybeIntervenePassively: looks like a help request, checking now");
     await runPassiveCheck(ctx, chatId, history, t, senderName);
-  } else {
-    debugLog(ctx, "maybeIntervenePassively: no heuristic matched, staying quiet");
   }
 }
 
@@ -714,11 +685,9 @@ export default async function (ctx) {
   lastActivityAt.set(chatId, Date.now());
   const pendingCont = pendingContinuation.get(chatId);
   if (pendingCont && pendingCont.senderName !== msg.senderName) pendingContinuation.delete(chatId);
-  debugLog(ctx, `msg from "${msg.senderName}" in ${chat.isGroup ? `group "${chat.name}"` : "DM"} | type=${msg.type} | body="${preview(msg.body, 80)}"`);
 
   const settingsCommand = config.get("MANYAI_SETTINGS_COMMAND", "ai-settings");
   if (settingsCommand && msg.is(settingsCommand)) {
-    debugLog(ctx, `settings command: ${msg.args.join(" ") || "status"}`);
     await handleSettingsCommand(ctx, msg.args, t);
     return;
   }
@@ -727,7 +696,7 @@ export default async function (ctx) {
   // Not everyone wants a chat listened to at all; "!ai-settings off" (above)
   // is the only thing that still works once this is set.
   const enabled = await getSetting(ctx, "enabled", true);
-  if (!enabled) { debugLog(ctx, "AI disabled for this chat, skipping"); return; }
+  if (!enabled) return;
 
   const lang         = config.get("LANGUAGE", "pt");
   const aiName       = config.get("AI_NAME", "");
@@ -750,7 +719,6 @@ export default async function (ctx) {
   if (msg.hasReply) {
     try {
       quotedRaw = await msg.getReply();
-      debugLog(ctx, `quoted message resolved: id=${quotedRaw?.key?.id || "?"} hasAudio=${!!quotedRaw?.message?.audioMessage}`);
     } catch (err) {
       ctx.log.info(t("logs.shouldRespond.quotedError", { error: err.message }));
     }
@@ -761,17 +729,16 @@ export default async function (ctx) {
   const NON_TEXT_MEDIA = ["image", "video", "sticker", "document"];
 
   let body = msg.body || "";
+  let isMediaNoCaption = false;
 
   if (msgType === "audio") {
     const transcribeOn = await getSetting(ctx, "transcribeAudio", true);
-    debugLog(ctx, `audio message, background transcribe=${transcribeOn}`);
     let transcript = "";
     if (transcribeOn) {
       const keys = getKeyPool(ctx);
       if (keys.length) {
         const transcribeModel = config.get("AI_TRANSCRIBE_MODEL", "whisper-large-v3-turbo");
         transcript = await transcribeCurrentMessage(msg, ctx, keys, transcribeModel);
-        debugLog(ctx, `transcription result: ${transcript ? `"${preview(transcript)}"` : "(empty/failed)"}`);
       }
     }
     if (transcript) {
@@ -789,11 +756,11 @@ export default async function (ctx) {
     // and fall through to the normal pipeline so the model judges, from
     // context, whether this genuinely needs a reply or should stay SILENT.
     body = `(${msgType} message, no caption)`;
+    isMediaNoCaption = true;
   }
 
   const triggerKind = getTriggerKind(msg, quotedRaw, triggers, wordRE, commandName, chatId);
   const isTrigger = !!triggerKind;
-  debugLog(ctx, `isTrigger=${isTrigger} triggerKind=${triggerKind}`);
 
   // A message is only treated as "another plugin's command" (background
   // context, ignored by the AI) if it ISN'T itself Many's own trigger —
@@ -802,10 +769,9 @@ export default async function (ctx) {
   // stored as role "user" (something that happened in the chat), not
   // "system" — a mid-conversation system-role message could be read by the
   // model as an instruction with special authority, which it isn't.
-  const isOtherPluginCommand = body.trim().startsWith(config.get("CMD_PREFIX", "!")) && !isTrigger;
+  const isOtherPluginCommand = msg.hasPrefix && !isTrigger;
 
   if (isOtherPluginCommand) {
-    debugLog(ctx, "stored as other-plugin command (background context, not archived to SEARCH_HISTORY)");
     pushEntry(history, { role: "user", kind: "command", current: false, content: formatCommandEntry({ senderName: msg.senderName, body }) });
   } else if (body.trim() || isTrigger) {
     // The `isTrigger` fallback covers the rare case of a genuine trigger
@@ -813,7 +779,6 @@ export default async function (ctx) {
     // poll) — otherwise an empty body (poll/unrecognized message types
     // that slip past the media checks above) isn't worth archiving at all.
     const quotedInfo = quotedRaw ? await buildQuotedInfo(quotedRaw, msg, ctx, chat.isGroup) : null;
-    debugLog(ctx, `stored as chat message + indexed${quotedInfo ? ` (with quoted context: "${preview(quotedInfo.text, 60)}")` : ""}`);
     pushEntry(history, {
       role: "user",
       kind: "chat",
@@ -824,16 +789,14 @@ export default async function (ctx) {
   }
 
   if (!isTrigger) {
-    if (chat.isGroup && !isOtherPluginCommand) {
-      debugLog(ctx, "not a trigger, considering passive intervention");
+    if (isMediaNoCaption) {
+      // Media without caption: keep as context only, never worth a passive check.
+    } else if (chat.isGroup && !isOtherPluginCommand) {
       maybeIntervenePassively(ctx, chatId, history, body, t, msg.senderName)
         .catch(err => ctx.log.error(`[many-ai] passive intervention error: ${err.message}`));
     } else if (!chat.isGroup && !isOtherPluginCommand) {
-      debugLog(ctx, "not a trigger, considering DM passive engagement");
       maybeInterveneInDM(ctx, chatId, history, body, t, msg.senderName)
         .catch(err => ctx.log.error(`[many-ai] DM passive engagement error: ${err.message}`));
-    } else {
-      debugLog(ctx, "not a trigger, no passive intervention (other-plugin command)");
     }
     return;
   }
@@ -858,7 +821,6 @@ export default async function (ctx) {
   try {
     const reply = await withChatLock(chatId, () => resolveReply(history, systemPrompt, ctx, t, MODEL, chatId));
     if (reply) {
-      debugLog(ctx, `sending reply: "${preview(reply)}"`);
       const handle = msg.reply.text(reply);
       await maybeSendAiDisclaimer(ctx);
       const rawSent = await handle.rawPromise; // raw proto — the only place .key.id actually lives
@@ -868,8 +830,6 @@ export default async function (ctx) {
       // extend it further, or the bot would keep answering the same
       // sender forever without ever being addressed again.
       if (triggerKind !== "continuation") markContinuation(chatId, msg.senderName);
-    } else {
-      debugLog(ctx, "trigger resolved to SILENT, not sending anything");
     }
   } catch (err) {
     ctx.log.error(`[many-ai] error: ${err.message}`);

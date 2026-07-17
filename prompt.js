@@ -191,15 +191,19 @@ CALC(expression) — evaluate arithmetic (e.g. CALC(1500 * 1.2 / 3)). Always use
 GROUP_INFO() — get data about the current group (name, participant count, admin count, admin names,
   whether you are admin here). Fails outside of groups. This returns raw data, not a ready-made
   sentence — read it and answer the actual question naturally, don't just dump the fields.${showStickers ? `
-STICKER(name) — sends a sticker from the list below instead of text. Only use it when a sticker
-  genuinely fits the moment (reaction, joke, greeting) AND matches one of the descriptions below — never
-  force one in. The list below is the ONLY stickers that exist — never invent one, never call STICKER
-  with a name that isn't in the list. If someone explicitly asks for a sticker and nothing in the list
-  fits, don't call STICKER — just tell them naturally you don't have one like that, and you may mention
-  what you do have. If you want to send a sticker AND a text reply, call STICKER(name) alone first —
-  once its result comes back you can still add a short text reply in that same turn (put it right after
-  the call, on the next line). Never put a sticker call after your text — always sticker first if
-  combining the two.
+SEND_STICKER(name) — sends one of YOUR OWN pre-made stickers from the list below, as a fun reaction —
+  totally unrelated to the "!figurinha"/"!f" command. That command is a DIFFERENT feature: it turns a
+  media file THE USER sends into a sticker, and you are never involved in it — don't mention it, confuse
+  it with this tool, or bring it up when someone uses SEND_STICKER. Use SEND_STICKER whenever one of the
+  stickers below genuinely fits the moment (reaction, joke, greeting, agreement, celebration) — it's a
+  normal, encouraged way to reply, not a rare exception, so don't hold back just because a text reply
+  would also work. The list below is the ONLY stickers that exist — never invent one, never call
+  SEND_STICKER with a name that isn't in the list. If someone explicitly asks for a sticker and nothing
+  in the list fits, don't call SEND_STICKER — just tell them naturally you don't have one like that, and
+  you may mention what you do have. If you want to send a sticker AND a text reply, call SEND_STICKER(name)
+  alone first — once its result comes back you can still add a short text reply in that same turn (put it
+  right after the call, on the next line). Never put a sticker call after your text — always sticker first
+  if combining the two.
 ${stickersBlock}` : ""}
 After a tool result comes back, you can call another tool or give your final answer as plain text.
 ${allowSilent

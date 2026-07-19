@@ -11,7 +11,8 @@
     "toolError": "Hubo un error al intentar usar {{tool}}.",
     "rateLimit": "Se alcanzó el límite de uso, intenta de nuevo en un momento.",
     "rateLimitWithRetry": "Se alcanzó el límite de uso. Intenta de nuevo en {{retryIn}}.",
-    "allKeysRateLimit": "Ninguna de las claves de API configuradas está funcionando ahora (límite de uso, clave inválida o inestabilidad de Groq). Intenta de nuevo en un momento."
+    "allKeysRateLimit": "Ninguna de las claves de API configuradas está funcionando ahora (límite de uso, clave inválida o inestabilidad de Groq). Intenta de nuevo en un momento.",
+    "emptyReply": "No pude armar una respuesta ahora. ¿Puedes repetir o reformular?"
   },
   "memory": {
     "dbOpened": "Base de datos de memoria abierta",

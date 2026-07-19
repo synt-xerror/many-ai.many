@@ -6,9 +6,7 @@
 // the API). Foundation for search, "what did I miss", pending decisions,
 // experts, docs generation, etc.
 
-import { createRequire } from "module";
-const require  = createRequire(import.meta.url);
-const sqlite3  = require("sqlite3").verbose();
+import { DatabaseSync } from "node:sqlite";
 
 let db           = null;
 let logRef       = null;
@@ -27,14 +25,12 @@ export function initHistory(ctx) {
   logRef = ctx.log;
 
   const dbPath = ctx.storage.resolve("history.db");
-  db = new sqlite3.Database(dbPath, (err) => {
-    if (err) logError(`[many-ai] history db open error: ${err.message}`);
-  });
 
-  db.serialize(() => {
-    db.run("PRAGMA journal_mode = WAL;");
+  try {
+    db = new DatabaseSync(dbPath);
+    db.exec("PRAGMA journal_mode = WAL;");
 
-    db.run(`
+    db.exec(`
       CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         chat_id TEXT NOT NULL,
@@ -42,27 +38,29 @@ export function initHistory(ctx) {
         body TEXT NOT NULL,
         created_at INTEGER NOT NULL
       )
-    `, (err) => { if (err) logError(`[many-ai] history table error: ${err.message}`); });
+    `);
 
-    db.run(`CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages (chat_id, created_at)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages (chat_id, created_at)`);
+  } catch (err) {
+    logError(`[many-ai] history db open error: ${err.message}`);
+    return;
+  }
 
-    // FTS5 lets SEARCH_HISTORY find things by meaning-adjacent word matches
-    // fast, entirely locally. If this build of sqlite3 lacks FTS5, we fall
-    // back to a plain LIKE scan instead of failing.
-    db.run(`
+  // FTS5 lets SEARCH_HISTORY find things by meaning-adjacent word matches
+  // fast, entirely locally. If this build of sqlite lacks FTS5, we fall
+  // back to a plain LIKE scan instead of failing.
+  try {
+    db.exec(`
       CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
         body, sender_name, chat_id UNINDEXED, created_at UNINDEXED,
         tokenize = 'unicode61 remove_diacritics 2'
       )
-    `, (err) => {
-      if (err) {
-        ftsAvailable = false;
-        logWarn(`[many-ai] FTS5 unavailable, falling back to LIKE search for history: ${err.message}`);
-      } else {
-        ftsAvailable = true;
-      }
-    });
-  });
+    `);
+    ftsAvailable = true;
+  } catch (err) {
+    ftsAvailable = false;
+    logWarn(`[many-ai] FTS5 unavailable, falling back to LIKE search for history: ${err.message}`);
+  }
 }
 
 /** Indexes one real chat message. Fire-and-forget — never blocks the reply path. */
@@ -71,28 +69,31 @@ export function indexMessage(chatId, senderName, body) {
   const text      = body.trim();
   const createdAt = Date.now();
 
-  db.run(
-    "INSERT INTO messages (chat_id, sender_name, body, created_at) VALUES (?, ?, ?, ?)",
-    [chatId, senderName, text, createdAt],
-    function (err) {
-      if (err) return logError(`[many-ai] history insert error: ${err.message}`);
-      if (ftsAvailable) {
-        db.run(
-          "INSERT INTO messages_fts (rowid, body, sender_name, chat_id, created_at) VALUES (?, ?, ?, ?, ?)",
-          [this.lastID, text, senderName, chatId, createdAt],
-          (err2) => { if (err2) logError(`[many-ai] fts insert error: ${err2.message}`); }
-        );
+  try {
+    const result = db
+      .prepare("INSERT INTO messages (chat_id, sender_name, body, created_at) VALUES (?, ?, ?, ?)")
+      .run(chatId, senderName, text, createdAt);
+
+    if (ftsAvailable) {
+      try {
+        db.prepare(
+          "INSERT INTO messages_fts (rowid, body, sender_name, chat_id, created_at) VALUES (?, ?, ?, ?, ?)"
+        ).run(result.lastInsertRowid, text, senderName, chatId, createdAt);
+      } catch (err2) {
+        logError(`[many-ai] fts insert error: ${err2.message}`);
       }
     }
-  );
+  } catch (err) {
+    return logError(`[many-ai] history insert error: ${err.message}`);
+  }
 
   if (Math.random() < PRUNE_PROBABILITY) pruneOld();
 }
 
 function pruneOld() {
   const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
-  db.run("DELETE FROM messages WHERE created_at < ?", [cutoff]);
-  if (ftsAvailable) db.run("DELETE FROM messages_fts WHERE created_at < ?", [cutoff]);
+  db.prepare("DELETE FROM messages WHERE created_at < ?").run(cutoff);
+  if (ftsAvailable) db.prepare("DELETE FROM messages_fts WHERE created_at < ?").run(cutoff);
 }
 
 function formatRow(r) {
@@ -107,41 +108,37 @@ function escapeLike(str) {
 }
 
 function likeSearch(chatId, q) {
-  return new Promise((resolve, reject) => {
-    db.all(
+  try {
+    const rows = db.prepare(
       `SELECT sender_name, body, created_at FROM messages
        WHERE chat_id = ? AND body LIKE ? ESCAPE '\\'
-       ORDER BY created_at DESC LIMIT ?`,
-      [chatId, `%${escapeLike(q)}%`, MAX_RESULTS],
-      (err, rows) => {
-        if (err) { logError(`[many-ai] history LIKE search error: ${err.message}`); return reject(err); }
-        resolve(rows.length ? rows.map(formatRow).join(" | ") : "no results found");
-      }
-    );
-  });
+       ORDER BY created_at DESC LIMIT ?`
+    ).all(chatId, `%${escapeLike(q)}%`, MAX_RESULTS);
+    return Promise.resolve(rows.length ? rows.map(formatRow).join(" | ") : "no results found");
+  } catch (err) {
+    logError(`[many-ai] history LIKE search error: ${err.message}`);
+    return Promise.reject(err);
+  }
 }
 
 /** Full-text search of a chat's archived messages. Returns a compact string, never the raw table. */
 export function searchHistory(chatId, query) {
-  return new Promise((resolve, reject) => {
-    if (!db) return reject(new Error("history not initialized"));
-    const q = (query || "").trim();
-    if (!q) return resolve("empty query");
-    if (!ftsAvailable) return likeSearch(chatId, q).then(resolve, reject);
+  if (!db) return Promise.reject(new Error("history not initialized"));
+  const q = (query || "").trim();
+  if (!q) return Promise.resolve("empty query");
+  if (!ftsAvailable) return likeSearch(chatId, q);
 
-    const ftsQuery = q.split(/\s+/).filter(Boolean).map(w => `${w.replace(/["*]/g, "")}*`).join(" ");
-    db.all(
+  const ftsQuery = q.split(/\s+/).filter(Boolean).map(w => `${w.replace(/["*]/g, "")}*`).join(" ");
+
+  try {
+    const rows = db.prepare(
       `SELECT sender_name, body, created_at FROM messages_fts
        WHERE chat_id = ? AND messages_fts MATCH ?
-       ORDER BY created_at DESC LIMIT ?`,
-      [chatId, ftsQuery, MAX_RESULTS],
-      (err, rows) => {
-        if (err) {
-          logError(`[many-ai] FTS search error, falling back to LIKE: ${err.message}`);
-          return likeSearch(chatId, q).then(resolve, reject);
-        }
-        resolve(rows.length ? rows.map(formatRow).join(" | ") : "no results found");
-      }
-    );
-  });
+       ORDER BY created_at DESC LIMIT ?`
+    ).all(chatId, ftsQuery, MAX_RESULTS);
+    return Promise.resolve(rows.length ? rows.map(formatRow).join(" | ") : "no results found");
+  } catch (err) {
+    logError(`[many-ai] FTS search error, falling back to LIKE: ${err.message}`);
+    return likeSearch(chatId, q);
+  }
 }

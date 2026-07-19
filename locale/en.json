@@ -11,7 +11,8 @@
     "toolError": "Something went wrong trying to use {{tool}}.",
     "rateLimit": "Rate limit reached, try again in a bit.",
     "rateLimitWithRetry": "Rate limit reached. Try again in {{retryIn}}.",
-    "allKeysRateLimit": "None of the configured API keys are working right now (rate limit, invalid key, or a Groq hiccup). Try again in a moment."
+    "allKeysRateLimit": "None of the configured API keys are working right now (rate limit, invalid key, or a Groq hiccup). Try again in a moment.",
+    "emptyReply": "Couldn't put together a reply just now. Mind repeating or rephrasing that?"
   },
   "memory": {
     "dbOpened": "Memory database opened",

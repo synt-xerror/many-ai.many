@@ -229,7 +229,7 @@ after the bot actually sends a real reply on a direct trigger — never on
 | Tool | What it does |
 |---|---|
 | **Web search** | News, results, dates, anything the model doesn't know. Tries Tavily, then Serper, then a handful of public SearXNG instances, then a DuckDuckGo HTML scrape, then a Wikipedia (pt) summary as a last resort — each attempt capped at 8s. |
-| **Memory** | Facts saved per chat via `MEM_WRITE`, recalled via `MEM_READ` — a group's memory never leaks into another group or DM. `MEM_READ(*)` returns everything saved (up to 20 most recent); a specific query does a `LIKE` search (up to 10 matches). |
+| **Memory** | Facts saved per chat via `MEM_WRITE`, recalled via `MEM_READ` — a group's memory never leaks into another group or DM. `MEM_READ *` returns everything saved (up to 20 most recent); a specific query does a `LIKE` search (up to 10 matches). |
 | **Calculator** | Exact arithmetic instead of letting the model "guess" numbers — expressions are whitelisted before evaluation. |
 | **Group info** | Name, participant count, admin count, admin names, whether the bot itself is admin. Returns raw data for the model to phrase naturally, not a canned sentence. |
 | **Search history** | Every text message in the chat is indexed locally (SQLite + FTS5, no API cost, LIKE-search fallback if FTS5 isn't available). "Who sent that Rust link last month?" searches the local index and only the matched result goes to the model — never the full history. Kept for 90 days per chat, pruned opportunistically. |
@@ -237,7 +237,7 @@ after the bot actually sends a real reply on a direct trigger — never on
 
 The model is instructed to never guess a volatile fact (scores, prices,
 news, anything that could be stale) — for those, its first reply must
-always be a `SEARCH(...)` call, even if it's "pretty sure".
+always be a `SEARCH ...` call, even if it's "pretty sure".
 
 ## Other configs
 

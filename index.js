@@ -7,7 +7,6 @@ import { callGroq, toApiMessages }       from "./groqClient.js";
 import { initHistory, indexMessage, searchHistory } from "./history.js";
 import { isTooShortToConsider, looksLikeUnansweredQuestion, looksLikeHelpRequest } from "./intervention.js";
 import { transcribeCurrentMessage, transcribeQuotedMessage } from "./voice.js";
-import { setupAiDisclaimer, maybeSendAiDisclaimer } from "./ai-disclaimer.js";
 import { listStickers, buildStickerBuffer } from "./stickers.js";
 
 const histories       = new Map();
@@ -820,8 +819,6 @@ async function maybeIntervenePassively(ctx, chatId, history, body, t, senderName
 }
 
 export async function setup(ctx) {
-  setupAiDisclaimer(ctx);
-
   const { t } = ctx.i18n.createT(import.meta.url);
 
   const keys = getKeyPool(ctx);
@@ -1011,7 +1008,6 @@ export default async function (ctx) {
       // THEN fire the sticker, preserving that order.
       const replyText = typeof reply === "object" ? reply.text : reply;
       const { lines, rawSents } = await sendReplyLines(ctx, msg, replyText);
-      await maybeSendAiDisclaimer(ctx);
       rawSents.forEach(rawSent => trackAiMessage(rawSent?.key?.id)); // raw proto — the only place .key.id actually lives
       markSelfEcho(chatId, lines);
       if (typeof reply === "object") await sendStickerAfterText(ctx, chatId, t, history, reply.stickerArg);

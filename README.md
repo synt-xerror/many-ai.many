@@ -212,18 +212,6 @@ Note these two are bot-wide (`ctx.config`), not per-chat like the on/off
 toggle above (`ctx.settings`) — one pack/author identity across every chat
 the bot is in.
 
-## First-time / experimental-feature disclaimer
-
-
-The first time someone directly triggers the AI (or the first time after 3
-full days without triggering it), a short disclaimer follows the reply,
-warning that it's an experimental AI feature and can make mistakes. Tracked
-per sender in its own local database — resets for a given person after 3
-days of inactivity, same idea as the "first time" greeting in `many-help`,
-but a separate table so the two don't interfere with each other. Only fires
-after the bot actually sends a real reply on a direct trigger — never on
-`SILENT`, and never on a passive-intervention reply nobody asked for.
-
 ## Tools
 
 | Tool | What it does |
@@ -300,11 +288,6 @@ STICKER_AUTHOR_NAME = "ManyBot"
   tool_use_failed` — the plugin detects this and recovers the intended call
   from the error body automatically, so it still runs; you shouldn't notice
   this happening.
-- **The experimental-feature disclaimer never shows up**: it relies on
-  Node's built-in `node:sqlite` module (separate from the `sqlite3` package
-  used by memory/history), which needs a reasonably recent Node.js version.
-  If that module isn't available, the disclaimer is silently skipped rather
-  than crashing the plugin.
 - **AI never sends stickers**: check the log line
   `stickers dir="..." found=N` on the next trigger — `found=0` means
   `stickers.json` is missing/empty/invalid at that exact path, or the images

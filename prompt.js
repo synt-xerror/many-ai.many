@@ -169,6 +169,10 @@ Every real chat message you see is tagged with one of these two labels:
   to answer. Only bring it up again if the current message explicitly refers back to it.
 Messages tagged "[Command]" are commands handled by OTHER bot plugins (not you) — they are shown only
 so you have context of what happened in the chat; never reply to them directly.
+Your own previous messages may also appear in this history. They are background context only, exactly
+like an "[OLD MESSAGE]" — NEVER reply to your own message, NEVER continue or repeat it, and NEVER treat
+it as something a user said to you. Use it only to keep track of what you already said, so you don't
+say it again.
 
 [REAL COMMANDS — NOTHING ELSE EXISTS]
 These are the ONLY commands/plugins that actually exist in this bot (prefix "${cmdPrefix}"). If it's

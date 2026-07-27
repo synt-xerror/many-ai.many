@@ -64,36 +64,3 @@ export async function transcribeCurrentMessage(msg, ctx, keys, model) {
   }
 }
 
-// Lazily (and only once) tries to load baileys' own downloadMediaMessage —
-// the plugin API doesn't expose a way to download an arbitrary QUOTED
-// message's media, only the current one. This is a best-effort fallback
-// for "reply to a voice note and ask about it", not an officially
-// guaranteed part of the plugin API — if it ever breaks (dependency not
-// installed, or a Baileys version mismatch), quoted-audio transcription
-// just silently stops working instead of crashing anything.
-let downloadMediaMessageFn; // undefined = not tried yet, false = tried and failed, function = ready
-async function getDownloadMediaMessage() {
-  if (downloadMediaMessageFn !== undefined) return downloadMediaMessageFn;
-  try {
-    const mod = await import("baileys");
-    downloadMediaMessageFn = mod.downloadMediaMessage ?? false;
-  } catch {
-    downloadMediaMessageFn = false;
-  }
-  return downloadMediaMessageFn;
-}
-
-/** Best-effort transcription of a QUOTED audio message. See note above. */
-export async function transcribeQuotedMessage(quotedRaw, ctx, keys, model) {
-  try {
-    const downloadMediaMessage = await getDownloadMediaMessage();
-    if (!downloadMediaMessage) return "";
-    const buffer = await downloadMediaMessage(quotedRaw, "buffer", {});
-    if (!buffer || !Buffer.isBuffer(buffer)) return "";
-    const mimetype = quotedRaw.message?.audioMessage?.mimetype || "audio/ogg";
-    return await withKeyFailover(keys, (key) => callTranscription(buffer, mimetype, key, model), ctx.log);
-  } catch (err) {
-    ctx.log.info(`[many-ai] couldn't transcribe quoted audio, staying silent about it: ${err.message}`);
-    return "";
-  }
-}

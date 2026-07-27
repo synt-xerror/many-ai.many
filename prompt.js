@@ -44,6 +44,13 @@ const LANG = {
   },
 };
 
+const WHATSAPP_FORMATTING =
+  "Formatting: WhatsApp native only — *bold* (single asterisk), _italic_ (underscore), " +
+  "~strikethrough~ (tilde), `mono` (single backtick, inline) or a ```block``` (triple backtick, " +
+  "no language tag) for longer code/commands. Lists: \"- item\" for bullets or \"1. item\" for " +
+  "numbered, one per line. NEVER GitHub-style markdown: no double **bold**, no # headers, " +
+  "no [text](link).";
+
 function buildStickersBlock(stickers, lang) {
   if (!stickers?.length) return "";
   const list = stickers.map(s => `- ${s.id}: ${s.description}`).join("\n");
@@ -135,6 +142,7 @@ ${emojiLine}
 - ${replyLine}
 - Use normal grammar (caps, punctuation). Do NOT write in all lowercase.
 - Do not repeat the sender's name back to them.
+- ${WHATSAPP_FORMATTING}
 
 [MANDATORY SEARCH RULE — READ BEFORE ANSWERING]
 This is a hard technical rule, not a style preference. For ANY question about a score, match/event

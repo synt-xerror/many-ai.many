@@ -6,16 +6,14 @@ import { getKeyPool, withKeyFailover }   from "./apiKeys.js";
 import { callGroq, toApiMessages }       from "./groqClient.js";
 import { initHistory, indexMessage, searchHistory } from "./history.js";
 import { isTooShortToConsider, looksLikeUnansweredQuestion, looksLikeHelpRequest } from "./intervention.js";
-import { transcribeCurrentMessage, transcribeQuotedMessage } from "./voice.js";
+import { transcribeCurrentMessage } from "./voice.js";
 import { listStickers, buildStickerBuffer } from "./stickers.js";
 
 const histories       = new Map();
-const aiMessageIds    = new Set();
 const lastActivityAt  = new Map(); // chatId -> timestamp of the most recent message, used to detect "did anyone reply while we were waiting"
 const chatLocks       = new Map(); // chatId -> promise chain, serializes AI resolution per chat (trigger + passive can otherwise race on the same history array)
 const pendingContinuation = new Map(); // chatId -> { senderName, expiresAt } — lets the next message from the SAME sender keep talking to the bot without repeating the trigger, as long as nobody else spoke first
 const recentlySentByBot   = new Map(); // chatId -> Array<{ body, expiresAt }> — the platform can hand the bot's own outgoing message back as a normal incoming event, one per line since a multi-line reply is now sent as separate messages; used to recognize that and stop it from re-triggering itself (word/literal/continuation all matched on it in testing, causing a self-reply loop)
-const MAX_TRACKED_AI_MESSAGES = 500; // avoids unbounded growth on long-uptime bots
 const MAX_TRACKED_CHATS       = 500; // caps the number of distinct chats kept in memory
 const CONTINUATION_WINDOW_MS  = 3 * 60_000; // how long a "same sender keeps talking to the bot" window stays open
 const SELF_ECHO_WINDOW_MS     = 20_000; // how long we watch for the bot's own message to bounce back as an incoming event
@@ -73,14 +71,6 @@ async function getStickerPromptExtras(ctx) {
 function preview(text, len = 100) {
   const s = String(text ?? "");
   return s.length > len ? s.slice(0, len) + "…" : s;
-}
-
-function trackAiMessage(id) {
-  if (!id) return;
-  aiMessageIds.add(id);
-  if (aiMessageIds.size > MAX_TRACKED_AI_MESSAGES) {
-    aiMessageIds.delete(aiMessageIds.values().next().value); // drop the oldest
-  }
 }
 
 const MAX_HISTORY      = 20;
@@ -146,30 +136,18 @@ function formatCommandEntry({ senderName, body }) {
   return `[Command] ${senderName} (${timeLabel()}): ${body}`;
 }
 
-// Pulls plain text out of a raw WhatsApp message proto — same shape ctx.msg
-// uses internally, but plugins only get the raw object back from
-// msg.getReply(), not a helper to read it.
-function quotedMsgBody(raw) {
-  const m = raw?.message;
-  if (!m) return "";
-  return (
-    m.conversation ??
-    m.extendedTextMessage?.text ??
-    m.imageMessage?.caption ??
-    m.videoMessage?.caption ??
-    m.documentMessage?.caption ??
-    ""
-  );
-}
-
 /**
  * Builds the "[replying to X: "..."]" info shown to the model when the
  * current message is a reply/quote. This is what was previously missing —
  * the AI never actually saw what a reply was replying to, only its own new
  * text, which is why it looked like it "didn't understand" replies.
+ *
+ * `quotedRaw` is whatever `msg.getReply()` resolves to — a normalized
+ * WAMessageContext (same shape as `ctx.msg` itself: `.body`, `.type`,
+ * `.fromMe`, `.senderName`, `.downloadMedia()`), never raw Baileys data.
  */
-async function buildQuotedInfo(quotedRaw, msg, ctx, isGroup, allowTranscribe) {
-  let text = quotedMsgBody(quotedRaw).trim();
+async function buildQuotedInfo(quotedRaw, ctx, allowTranscribe) {
+  let text = (quotedRaw.body || "").trim();
   let isTranscript = false;
   let transcriptFailed = false;
 
@@ -177,12 +155,12 @@ async function buildQuotedInfo(quotedRaw, msg, ctx, isGroup, allowTranscribe) {
   // demand, ONLY when the current message is itself addressed to the bot
   // (allowTranscribe). Otherwise this quote is just background chat between
   // other people and isn't worth spending a Whisper call on.
-  if (!text && quotedRaw.message?.audioMessage) {
+  if (!text && quotedRaw.type === "audio") {
     if (allowTranscribe) {
       const keys = getKeyPool(ctx);
       if (keys.length) {
         const model = ctx.config.get("AI_TRANSCRIBE_MODEL", "whisper-large-v3-turbo");
-        text = (await transcribeQuotedMessage(quotedRaw, ctx, keys, model)).trim();
+        text = (await transcribeCurrentMessage(quotedRaw, ctx, keys, model)).trim();
         isTranscript = true;
       }
       transcriptFailed = !text; // no keys configured, or transcription attempt came back empty
@@ -192,23 +170,9 @@ async function buildQuotedInfo(quotedRaw, msg, ctx, isGroup, allowTranscribe) {
   }
   if (!text && !transcriptFailed) return null; // genuinely nothing to show (other media, no audio)
 
-  const quotedId = quotedRaw.key?.id;
-  let senderLabel;
-
-  if (quotedId && aiMessageIds.has(quotedId)) {
-    senderLabel = "you (the AI)";
-  } else if (isGroup && quotedRaw.key?.participant) {
-    try {
-      const contact = await ctx.contacts.get(quotedRaw.key.participant);
-      senderLabel = contact?.pushname || contact?.name || quotedRaw.key.participant.split("@")[0];
-    } catch {
-      senderLabel = quotedRaw.key.participant.split("@")[0];
-    }
-  } else {
-    // DM (or a group quote missing the participant field): the only other
-    // party in a 1:1 chat is the current sender themself.
-    senderLabel = msg.senderName;
-  }
+  // quotedRaw.senderName is already normalized (real display name if known,
+  // bare number fallback otherwise) — no need to resolve the contact again.
+  const senderLabel = quotedRaw.fromMe ? "you (the AI)" : quotedRaw.senderName;
 
   return {
     senderLabel,
@@ -341,8 +305,7 @@ async function runTool(command, arg, ctx, chatId, t, opts) {
     case "SEND_STICKER": {
       try {
         const buffer = await buildStickerBuffer(ctx, arg, { pack: opts.stickerPack, author: opts.stickerAuthor });
-        const rawSent = await ctx.send.sticker(buffer).rawPromise;
-        trackAiMessage(rawSent?.key?.id); // otherwise quoting the sticker itself never matches aiMessageIds
+        await ctx.send.sticker(buffer);
         return t("tools.stickerSent");
       } catch (err) {
         if (err.message === "sticker-not-found") return t("tools.stickerNotFound", { name: arg });
@@ -392,6 +355,52 @@ async function sendStickerAfterText(ctx, chatId, t, history, stickerArg) {
   } catch (err) {
     ctx.log.error(`[many-ai] error in SEND_STICKER (after text): ${err.message}`);
   }
+}
+
+/**
+ * Handles whatever the model wrote after a SEND_STICKER call on its own
+ * first line. The model sometimes stacks several SEND_STICKER calls back to
+ * back in the same turn (one per sticker it wants to send) instead of one
+ * per turn — parseReply only ever treats the FIRST line as "the command",
+ * so without this, every SEND_STICKER after the first used to come back as
+ * raw trailing text and get sent to the user verbatim (e.g. a literal
+ * "SEND_STICKER many-blueberry" line leaking into the chat), and only the
+ * first sticker actually got sent. This keeps re-parsing the trailing text,
+ * firing every further SEND_STICKER it finds, until what's left is genuine
+ * reply text (or nothing), and returns that as the final answer.
+ */
+async function drainStickerTrailing(trailing, ctx, chatId, t, opts, history) {
+  let text = trailing;
+  while (text) {
+    const parsed = parseReply(text);
+
+    if (parsed.type === "command" && parsed.command === "SEND_STICKER") {
+      let result;
+      try {
+        result = await runTool("SEND_STICKER", parsed.arg, ctx, chatId, t, opts);
+      } catch (err) {
+        ctx.log.error(`[many-ai] error in SEND_STICKER (chained): ${err.message}`);
+        result = t("errors.toolError", { tool: "SEND_STICKER" });
+      }
+      pushEntry(history, { role: "user", kind: "tool", content: `[${t("tools.resultLabel")}: SEND_STICKER] ${result}` });
+      text = parsed.trailing || "";
+      continue;
+    }
+
+    if (parsed.type === "textThenSticker") {
+      // Text followed by one more sticker call at the very end — drain that
+      // last sticker too, then return the leading text as the final reply.
+      await drainStickerTrailing(`SEND_STICKER ${parsed.stickerArg}`, ctx, chatId, t, opts, history);
+      return parsed.value || null;
+    }
+
+    if (parsed.type === "silent") return null;
+
+    // Genuine leftover text (or a non-sticker command line, which we don't
+    // try to execute here — same as before, it's just returned as text).
+    return parsed.value ?? text;
+  }
+  return null;
 }
 
 async function resolveReply(history, systemPrompt, ctx, t, MODEL, chatId, maxIterations = 5, triggerKind = null) {
@@ -462,7 +471,7 @@ async function resolveReply(history, systemPrompt, ctx, t, MODEL, chatId, maxIte
     // reply right after the call on the same turn, that's the final answer,
     // no need to spend another API call asking for it again.
     if (parsed.command === "SEND_STICKER" && parsed.trailing) {
-      return parsed.trailing;
+      return await drainStickerTrailing(parsed.trailing, ctx, chatId, t, opts, history);
     }
   }
 
@@ -485,8 +494,7 @@ function getTriggerKind(msg, quotedRaw, triggers, wordRE, commandName, chatId) {
   // so a reply that also happens to mention the name (e.g. "Many vc é muito
   // legal" sent as a reply to the bot) is correctly classified as "quote"
   // (forces a real answer) instead of "word" (still allows SILENT).
-  const quotedId = quotedRaw?.key?.id;
-  if (quotedId && aiMessageIds.has(quotedId)) return "quote"; // quoting the AI's own message
+  if (quotedRaw?.fromMe) return "quote"; // quoting the AI's own message
 
   // A message formatted as a command (e.g. "!figurinha") is addressed to
   // whichever plugin actually owns that command — it must never trigger the
@@ -546,28 +554,24 @@ function splitReplyLines(reply) {
 const MULTI_LINE_DELAY_MS = 500; // gap between bubbles so they read as separate messages, not a burst
 
 /** Sends a (possibly multi-line) reply as one message per line — quotes the original message on
- * the first line only; the rest are plain follow-ups in the same chat. Returns the raw sent protos. */
+ * the first line only; the rest are plain follow-ups in the same chat. */
 async function sendReplyLines(ctx, msg, reply) {
   const lines = splitReplyLines(reply);
-  const rawSents = [];
   for (let i = 0; i < lines.length; i++) {
     if (i > 0) await new Promise(r => setTimeout(r, MULTI_LINE_DELAY_MS));
-    const handle = i === 0 ? msg.reply.text(lines[i]) : ctx.send.text(lines[i]);
-    rawSents.push(await handle.rawPromise);
+    await (i === 0 ? msg.reply.text(lines[i]) : ctx.send.text(lines[i]));
   }
-  return { lines, rawSents };
+  return { lines };
 }
 
 /** Same, but for unprompted sends (passive intervention) — no original message to quote. */
 async function sendBroadcastLines(ctx, reply) {
   const lines = splitReplyLines(reply);
-  const rawSents = [];
   for (let i = 0; i < lines.length; i++) {
     if (i > 0) await new Promise(r => setTimeout(r, MULTI_LINE_DELAY_MS));
-    const handle = ctx.send.text(lines[i]);
-    rawSents.push(await handle.rawPromise);
+    await ctx.send.text(lines[i]);
   }
-  return { lines, rawSents };
+  return { lines };
 }
 
 /**
@@ -761,8 +765,7 @@ async function runPassiveCheck(ctx, chatId, history, t, senderName, { dm = false
     const replyText = typeof reply === "object" ? reply.text : reply;
 
     pushEntry(history, { role: "assistant", kind: "tool", content: replyText });
-    const { lines, rawSents } = await sendBroadcastLines(ctx, replyText); // unprompted — nothing to quote
-    rawSents.forEach(rawSent => trackAiMessage(rawSent?.key?.id));
+    const { lines } = await sendBroadcastLines(ctx, replyText); // unprompted — nothing to quote
     markSelfEcho(chatId, lines);
     if (typeof reply === "object") await sendStickerAfterText(ctx, chatId, t, history, reply.stickerArg);
     if (senderName) markContinuation(chatId, senderName);
@@ -957,7 +960,7 @@ export default async function (ctx) {
     // with no text of its own (e.g. quoting the AI's last message via a
     // poll) — otherwise an empty body (poll/unrecognized message types
     // that slip past the media checks above) isn't worth archiving at all.
-    const quotedInfo = quotedRaw ? await buildQuotedInfo(quotedRaw, msg, ctx, chat.isGroup, isTrigger) : null;
+    const quotedInfo = quotedRaw ? await buildQuotedInfo(quotedRaw, ctx, isTrigger) : null;
     pushEntry(history, {
       role: "user",
       kind: "chat",
@@ -1007,8 +1010,7 @@ export default async function (ctx) {
       // when the model wrote "text first, sticker after" — send the text,
       // THEN fire the sticker, preserving that order.
       const replyText = typeof reply === "object" ? reply.text : reply;
-      const { lines, rawSents } = await sendReplyLines(ctx, msg, replyText);
-      rawSents.forEach(rawSent => trackAiMessage(rawSent?.key?.id)); // raw proto — the only place .key.id actually lives
+      const { lines } = await sendReplyLines(ctx, msg, replyText);
       markSelfEcho(chatId, lines);
       if (typeof reply === "object") await sendStickerAfterText(ctx, chatId, t, history, reply.stickerArg);
       // Only a "real" trigger (command/word/literal/quote) opens a fresh

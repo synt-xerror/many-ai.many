@@ -222,6 +222,9 @@ the bot is in.
 | **Group info** | Name, participant count, admin count, admin names, whether the bot itself is admin. Returns raw data for the model to phrase naturally, not a canned sentence. |
 | **Search history** | Every text message in the chat is indexed locally (SQLite + FTS5, no API cost, LIKE-search fallback if FTS5 isn't available). "Who sent that Rust link last month?" searches the local index and only the matched result goes to the model — never the full history. Kept for 90 days per chat, pruned opportunistically. |
 | **Stickers** | Sends one from the configured manifest when it genuinely fits — see [Stickers](#stickers) above. Closed list, never invented. |
+| **Local knowledge index** | `INDEX_SEARCH` — free, no API cost. Searches a curated folder of `.txt` files (`AI_INDEX_DIR`), one topic per file, matched by keyword overlap; the model is told to try this before `SEARCH`. Disabled (returns "not configured") if the config isn't set. |
+| **Wikipedia** | `WIKI_SEARCH` (find a matching article title) then `WIKI_FETCH` (get its full text) — free, no API cost. Uses the bot's `LANGUAGE` edition of Wikipedia, falls back to English if that edition has nothing. |
+| **Page fetch** | `FETCH` — reads a specific URL (from a search result or a link someone shared) and returns its readable text, HTML stripped. 10s timeout, ~4000 chars max. |
 
 The model is instructed to never guess a volatile fact (scores, prices,
 news, anything that could be stale) — for those, its first reply must
@@ -246,6 +249,7 @@ AI_INTERVENTION_WAIT_MINUTES = 1
 AI_PASSIVE_MODEL = "llama-3.1-8b-instant"
 STICKER_PACK_NAME = "Many AI"
 STICKER_AUTHOR_NAME = "ManyBot"
+AI_INDEX_DIR = "/home/user/.manybot/many-ai-knowledge"  # optional, .txt files for INDEX_SEARCH
 ```
 
 ## How it reads WhatsApp

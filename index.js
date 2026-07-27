@@ -1,4 +1,7 @@
 import { doSearch }                      from "./search.js";
+import { fetchPage }                     from "./webFetch.js";
+import { wikiSearchTitles, wikiFetchArticle } from "./wikipedia.js";
+import { searchLocalIndex }              from "./localKnowledge.js";
 import { memRead, memWrite, initMemory } from "./memory.js";
 import { buildSystemPrompt }             from "./prompt.js";
 import { safeCalc, getGroupInfo }        from "./tools.js";
@@ -77,7 +80,10 @@ const MAX_HISTORY      = 20;
 const DEFAULT_MAX_TOKENS = 300;
 const MAX_QUOTED_LEN     = 200;
 
-const KNOWN_COMMANDS = ["SEARCH", "SEARCH_HISTORY", "MEM_READ", "MEM_WRITE", "CALC", "GROUP_INFO", "SEND_STICKER"];
+const KNOWN_COMMANDS = [
+  "SEARCH", "SEARCH_HISTORY", "MEM_READ", "MEM_WRITE", "CALC", "GROUP_INFO", "SEND_STICKER",
+  "FETCH", "WIKI_SEARCH", "WIKI_FETCH", "INDEX_SEARCH",
+];
 
 function buildWordTriggerRE(words) {
   if (!words?.length) return null;
@@ -279,6 +285,18 @@ export function parseReply(reply) {
 
 async function runTool(command, arg, ctx, chatId, t, opts) {
   switch (command) {
+    case "INDEX_SEARCH":
+      return searchLocalIndex(arg, opts.indexDir);
+
+    case "WIKI_SEARCH":
+      return wikiSearchTitles(arg, opts.lang);
+
+    case "WIKI_FETCH":
+      return wikiFetchArticle(arg, opts.lang);
+
+    case "FETCH":
+      return fetchPage(arg);
+
     case "SEARCH":
       return doSearch(arg, { TAVILY_API_KEY: opts.tavilyKey, SERPER_API_KEY: opts.serperKey, log: ctx.log });
 
@@ -337,24 +355,55 @@ function getToolOpts(ctx) {
     serperKey: ctx.config.get("SERPER_API_KEY"),
     stickerPack: ctx.config.get("STICKER_PACK_NAME", "Many AI"),
     stickerAuthor: ctx.config.get("STICKER_AUTHOR_NAME", "ManyBot"),
+    lang: ctx.config.get("LANGUAGE", "pt"),
+    indexDir: ctx.config.get("AI_INDEX_DIR", ""),
   };
 }
 
 /**
- * Runs the SEND_STICKER tool after the text reply has already gone out —
- * the "text first, sticker after" order (see parseReply's "textThenSticker"
- * case). Mirrors the tool-result bookkeeping resolveReply does for every
- * other tool call, so the history stays consistent regardless of which
- * order the model chose. Never throws — a failed sticker send here
- * shouldn't take down a reply the user already received.
+ * Fires a list of SEND_STICKER calls in order, after the text reply has
+ * already gone out — the "text first, stickers after" order (see
+ * parseReply's "textThenSticker" case). Mirrors the tool-result bookkeeping
+ * resolveReply does for every other tool call, so history stays consistent.
+ * Never throws — a failed sticker send here shouldn't take down a reply the
+ * user already received.
  */
-async function sendStickerAfterText(ctx, chatId, t, history, stickerArg) {
-  try {
-    const result = await runTool("SEND_STICKER", stickerArg, ctx, chatId, t, getToolOpts(ctx));
-    pushEntry(history, { role: "user", kind: "tool", content: `[${t("tools.resultLabel")}: SEND_STICKER] ${result}` });
-  } catch (err) {
-    ctx.log.error(`[many-ai] error in SEND_STICKER (after text): ${err.message}`);
+async function sendStickerAfterText(ctx, chatId, t, history, stickerArgs) {
+  const args = Array.isArray(stickerArgs) ? stickerArgs : [stickerArgs];
+  for (const arg of args.filter(Boolean)) {
+    try {
+      const result = await runTool("SEND_STICKER", arg, ctx, chatId, t, getToolOpts(ctx));
+      pushEntry(history, { role: "user", kind: "tool", content: `[${t("tools.resultLabel")}: SEND_STICKER] ${result}` });
+    } catch (err) {
+      ctx.log.error(`[many-ai] error in SEND_STICKER (after text): ${err.message}`);
+    }
   }
+}
+
+/**
+ * Pure — no side effects. Sweeps every line of a text block for a
+ * SEND_STICKER (or abbreviated SEND) call and pulls it out, in order,
+ * returning what's left as the real reply text. Needed because parseReply's
+ * "textThenSticker" only detects a sticker call on the very LAST line — a
+ * model that stacks several calls with intro text (e.g. listing multiple
+ * stickers) used to have every call except the last one ride along as
+ * literal text instead of firing. Kept separate from actually firing them
+ * so callers can send the text FIRST and only fire stickers afterward —
+ * firing here too early is what caused stickers to arrive before the text.
+ */
+function extractStickerCalls(textBlock) {
+  const lines = (textBlock || "").split("\n");
+  const kept = [];
+  const stickerArgs = [];
+
+  for (const line of lines) {
+    const call = line.trim().match(/^SEND(?:_STICKER)?(?:[ \t]+(.*))?$/i);
+    const arg = call?.[1]?.trim();
+    if (call && arg) stickerArgs.push(arg);
+    else kept.push(line);
+  }
+
+  return { text: kept.join("\n").trim(), stickerArgs };
 }
 
 /**
@@ -366,8 +415,12 @@ async function sendStickerAfterText(ctx, chatId, t, history, stickerArg) {
  * raw trailing text and get sent to the user verbatim (e.g. a literal
  * "SEND_STICKER many-blueberry" line leaking into the chat), and only the
  * first sticker actually got sent. This keeps re-parsing the trailing text,
- * firing every further SEND_STICKER it finds, until what's left is genuine
- * reply text (or nothing), and returns that as the final answer.
+ * firing every further bare SEND_STICKER it finds immediately — correct
+ * while nothing but stickers have appeared yet, since there's no text order
+ * to preserve. The moment real text shows up (a "textThenSticker" line),
+ * that stops: any stickers from that point on are handed back to the caller
+ * as a deferred {text, stickerArg} instead, so they fire only after the
+ * text they came with is actually sent.
  */
 async function drainStickerTrailing(trailing, ctx, chatId, t, opts, history) {
   let text = trailing;
@@ -388,10 +441,15 @@ async function drainStickerTrailing(trailing, ctx, chatId, t, opts, history) {
     }
 
     if (parsed.type === "textThenSticker") {
-      // Text followed by one more sticker call at the very end — drain that
-      // last sticker too, then return the leading text as the final reply.
-      await drainStickerTrailing(`SEND_STICKER ${parsed.stickerArg}`, ctx, chatId, t, opts, history);
-      return parsed.value || null;
+      // Real text has shown up in the trail — from here on, any further
+      // stickers (embedded in this text, plus the trailing one) must wait
+      // until AFTER this text is sent, same as resolveReply's own
+      // textThenSticker case. Stop firing immediately and hand back a
+      // deferred {text, stickerArg} for the caller to send first, then fire
+      // — firing here would put these stickers ahead of text nobody's sent
+      // to the user yet.
+      const { text: cleanedLeading, stickerArgs: embedded } = extractStickerCalls(parsed.value);
+      return { text: cleanedLeading || null, stickerArg: [...embedded, parsed.stickerArg] };
     }
 
     if (parsed.type === "silent") return null;
@@ -446,12 +504,16 @@ async function resolveReply(history, systemPrompt, ctx, t, MODEL, chatId, maxIte
       return null;
     }
     if (parsed.type === "textThenSticker") {
-      // Deliberately NOT sending the sticker here — the tool would fire
-      // immediately, before the caller ever gets a chance to send the text,
-      // reversing the order the model was asked for. The caller sends
-      // `text` first, then runs SEND_STICKER itself with `stickerArg`.
+      // Pull any SEND_STICKER lines hiding inside the leading text out too —
+      // otherwise only the very last call in the reply ever actually fires
+      // and the rest leak as literal "SEND_STICKER x" text. extractStickerCalls
+      // is pure (no firing) — every sticker found, embedded or trailing, is
+      // left for the caller to fire, in order, only AFTER it sends `text`.
+      // Firing any of them here would jump them ahead of text the caller
+      // hasn't sent yet, reversing the order the model was asked for.
+      const { text: cleanedText, stickerArgs: embedded } = extractStickerCalls(parsed.value);
       //ctx.log.info(`[many-ai:debug] ${chatTag} iter=${i + 1}/${maxIterations} → text + SEND_STICKER(${parsed.stickerArg}) after`);
-      return { text: parsed.value, stickerArg: parsed.stickerArg };
+      return { text: cleanedText || null, stickerArg: [...embedded, parsed.stickerArg] };
     }
 
     //ctx.log.info(`[many-ai:debug] ${chatTag} iter=${i + 1}/${maxIterations} → ${parsed.command}(${parsed.arg})`);

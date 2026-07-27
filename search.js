@@ -1,5 +1,7 @@
 // src/plugins/many-ai/search.js
 
+import { fetchWithTimeout } from "./httpUtils.js";
+
 const SEARX_INSTANCES = [
   "https://search.sapti.me",
   "https://search.rhscz.eu",
@@ -7,23 +9,6 @@ const SEARX_INSTANCES = [
   "https://search.xcloud.live",
   "https://search.projectsegfault.com",
 ];
-
-const FETCH_TIMEOUT_MS = 8000;
-
-// Every provider below goes through this instead of raw fetch(). Without a
-// timeout here, a hung request to any one provider could stall the whole
-// tool-call loop indefinitely — many-ai turns off the framework's own
-// 2-minute guard specifically to allow slower multi-step tool use, so it's
-// on this file to make sure "slower" never means "forever".
-async function fetchWithTimeout(url, options = {}, ms = FETCH_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), ms);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-}
 
 export async function doSearch(query, { TAVILY_API_KEY, SERPER_API_KEY, log } = {}) {
   // 1. Tavily

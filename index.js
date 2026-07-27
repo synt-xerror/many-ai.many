@@ -338,17 +338,6 @@ async function runTool(command, arg, ctx, chatId, t, opts) {
   }
 }
 
-// TEMP DEBUG (remove after testing): mirrors prompt.js's FORCE_ANSWER — used
-// only to flag the suspicious case of the model going SILENT on a trigger
-// kind that was never supposed to offer that option.
-const DEBUG_FORCE_ANSWER = new Set(["command", "quote"]);
-
-// TEMP DEBUG: full chatId is a long JID, noisy in logs — just enough of it to
-// tell chats apart while testing.
-function shortChat(chatId) {
-  return (chatId || "").split("@")[0].slice(-6);
-}
-
 function getToolOpts(ctx) {
   return {
     tavilyKey: ctx.config.get("TAVILY_API_KEY"),
@@ -467,25 +456,18 @@ async function resolveReply(history, systemPrompt, ctx, t, MODEL, chatId, maxIte
 
   const opts = getToolOpts(ctx);
   const maxTokens = Number(ctx.config.get("MANYAI_MAX_TOKENS", DEFAULT_MAX_TOKENS)) || DEFAULT_MAX_TOKENS;
-  const chatTag = `chat=…${shortChat(chatId)} trigger=${triggerKind ?? "none"}`;
 
   for (let i = 0; i < maxIterations; i++) {
     let raw;
     try {
       raw = await withKeyFailover(keys, (key) => callGroq(history, systemPrompt, key, MODEL, maxTokens), ctx.log);
     } catch (err) {
-      //ctx.log.warn(`[many-ai:debug] ${chatTag} iter=${i + 1}/${maxIterations} groq call failed: ${err.message}`);
       throw err;
     }
 
     const parsed = parseReply(raw);
 
     if (!raw) {
-      // Groq returned a genuinely empty completion (not the model choosing
-      // SILENT) — don't record it in history, or it contaminates every
-      // future call in this chat with a blank assistant turn and the model
-      // starts repeating the pattern instead of recovering.
-      //ctx.log.warn(`[many-ai:debug] ${chatTag} iter=${i + 1}/${maxIterations} empty completion from Groq, retrying without recording it`);
       continue;
     }
 
@@ -493,14 +475,6 @@ async function resolveReply(history, systemPrompt, ctx, t, MODEL, chatId, maxIte
 
     if (parsed.type === "msg") return parsed.value;
     if (parsed.type === "silent") {
-      if (DEBUG_FORCE_ANSWER.has(triggerKind)) {
-        // This should never happen — the prompt doesn't offer SILENT as an
-        // option for this trigger kind. If you see this line, the model
-        // ignored the instruction; worth logging the raw reply too.
-        //ctx.log.warn(`[many-ai:debug] ${chatTag} ⚠ SILENT despite forced-answer trigger, raw="${raw}"`);
-      } else {
-        //ctx.log.info(`[many-ai:debug] ${chatTag} iter=${i + 1}/${maxIterations} → SILENT`);
-      }
       return null;
     }
     if (parsed.type === "textThenSticker") {
@@ -512,11 +486,8 @@ async function resolveReply(history, systemPrompt, ctx, t, MODEL, chatId, maxIte
       // Firing any of them here would jump them ahead of text the caller
       // hasn't sent yet, reversing the order the model was asked for.
       const { text: cleanedText, stickerArgs: embedded } = extractStickerCalls(parsed.value);
-      //ctx.log.info(`[many-ai:debug] ${chatTag} iter=${i + 1}/${maxIterations} → text + SEND_STICKER(${parsed.stickerArg}) after`);
       return { text: cleanedText || null, stickerArg: [...embedded, parsed.stickerArg] };
     }
-
-    //ctx.log.info(`[many-ai:debug] ${chatTag} iter=${i + 1}/${maxIterations} → ${parsed.command}(${parsed.arg})`);
 
     let result;
     try {
@@ -537,7 +508,6 @@ async function resolveReply(history, systemPrompt, ctx, t, MODEL, chatId, maxIte
     }
   }
 
-  //ctx.log.warn(`[many-ai:debug] ${chatTag} gave up after ${maxIterations} iterations, no final answer`);
   ctx.log.warn(t("logs.maxIterationsReached"));
   return null;
 }
@@ -1002,10 +972,6 @@ export default async function (ctx) {
   // triggers (word/literal/continuation/quote) must not fire on it.
   if (isMediaNoCaption && triggerKind !== "command") triggerKind = null;
   const isTrigger = !!triggerKind;
-  // TEMP DEBUG (remove after testing): confirms which trigger kind (if any)
-  // fired for a given message — key for checking continuation actually hits.
-  //ctx.log.info(`[many-ai:debug] chat=…${shortChat(chatId)} trigger=${triggerKind ?? "none"} echo=${isSelfEcho} fromMe=${msg.fromMe} from=${msg.senderName}: "${body || `(${msgType})`}"`);
-
   // A message is only treated as "another plugin's command" (background
   // context, ignored by the AI) if it ISN'T itself Many's own trigger —
   // otherwise "!ai question" would get stored as a command and the user's

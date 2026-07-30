@@ -16,7 +16,7 @@ const histories       = new Map();
 const lastActivityAt  = new Map(); // chatId -> timestamp of the most recent message, used to detect "did anyone reply while we were waiting"
 const chatLocks       = new Map(); // chatId -> promise chain, serializes AI resolution per chat (trigger + passive can otherwise race on the same history array)
 const pendingContinuation = new Map(); // chatId -> { senderName, expiresAt } — lets the next message from the SAME sender keep talking to the bot without repeating the trigger, as long as nobody else spoke first
-const recentlySentByBot   = new Map(); // chatId -> Array<{ body, expiresAt }> — the platform can hand the bot's own outgoing message back as a normal incoming event, one per line since a multi-line reply is now sent as separate messages; used to recognize that and stop it from re-triggering itself (word/literal/continuation all matched on it in testing, causing a self-reply loop)
+const recentlySentByBot   = new Map(); // chatId -> Array<{ body, expiresAt }> — the platform can hand the bot's own outgoing message back as a normal incoming event; used to recognize that and stop it from re-triggering itself (word/literal/continuation all matched on it in testing, causing a self-reply loop)
 const MAX_TRACKED_CHATS       = 500; // caps the number of distinct chats kept in memory
 const CONTINUATION_WINDOW_MS  = 3 * 60_000; // how long a "same sender keeps talking to the bot" window stays open
 const SELF_ECHO_WINDOW_MS     = 20_000; // how long we watch for the bot's own message to bounce back as an incoming event
@@ -283,6 +283,78 @@ export function parseReply(reply) {
   return { type: "msg", value: stripped || text };
 }
 
+const PROGRESS_TOOLS = { SEARCH: "search", FETCH: "fetch" }; // command -> locale key stem
+const PROGRESS_TICK_MS = 700;
+
+function countSources(resultText) {
+  return (resultText || "").split(" | ").filter(Boolean).length || 1;
+}
+
+/** Best-effort .edit() — the progress animation is cosmetic, never let it break the actual tool call. */
+async function safeEdit(handle, text) {
+  try {
+    if (typeof handle?.edit === "function") await handle.edit(text);
+  } catch (_) {}
+}
+
+/**
+ * Wraps a SEARCH/FETCH tool call with a "🔍 Pesquisando..." message that's
+ * edited in place (dots animating, then a ✅/⚠️ summary) while the real
+ * call runs in the background. Any other tool, or a chat that doesn't
+ * support .edit(), just runs the call directly — this is purely cosmetic
+ * and must never be the reason a tool call fails.
+ */
+async function withToolProgress(command, ctx, t, task) {
+  const key = PROGRESS_TOOLS[command];
+  if (!key) return task();
+
+  let handle;
+  try {
+    handle = ctx.send.text(`🔍 ${t(`tools.progress.${key}`)}`);
+    await handle;
+  } catch (_) {
+    return task(); // couldn't even send the progress message — just run the tool
+  }
+
+  // Every edit (dot-ticks and the final result) is chained onto this same
+  // promise, so they always run in order and the final edit can never be
+  // overwritten by a tick that was still in flight when it was queued.
+  let editChain = Promise.resolve();
+  const queueEdit = (text) => (editChain = editChain.then(() => safeEdit(handle, text)));
+
+  let dots = 0;
+  let stopped = false;
+  let tickTimer = null;
+  const scheduleTick = () => {
+    tickTimer = setTimeout(() => {
+      if (stopped) return;
+      dots = (dots % 3) + 1;
+      queueEdit(`🔍 ${t(`tools.progress.${key}`)}${".".repeat(dots)}`);
+      scheduleTick();
+    }, PROGRESS_TICK_MS);
+  };
+  scheduleTick();
+
+  const stop = () => {
+    stopped = true;
+    clearTimeout(tickTimer);
+  };
+
+  try {
+    const result = await task();
+    stop();
+    const done = command === "SEARCH"
+      ? t("tools.progress.searchDone", { count: countSources(result) })
+      : t("tools.progress.fetchDone");
+    await queueEdit(`✅ ${done}`);
+    return result;
+  } catch (err) {
+    stop();
+    await queueEdit(`⚠️ ${t("tools.progress.failed")}`);
+    throw err;
+  }
+}
+
 async function runTool(command, arg, ctx, chatId, t, opts) {
   switch (command) {
     case "INDEX_SEARCH":
@@ -491,7 +563,8 @@ async function resolveReply(history, systemPrompt, ctx, t, MODEL, chatId, maxIte
 
     let result;
     try {
-      result = await runTool(parsed.command, parsed.arg, ctx, chatId, t, opts);
+      result = await withToolProgress(parsed.command, ctx, t, () =>
+        runTool(parsed.command, parsed.arg, ctx, chatId, t, opts));
     } catch (err) {
       ctx.log.error(`[many-ai] error in ${parsed.command}: ${err.message}`);
       result = t("errors.toolError", { tool: parsed.command });
@@ -550,9 +623,8 @@ function markContinuation(chatId, senderName) {
   pendingContinuation.set(chatId, { senderName, expiresAt: Date.now() + CONTINUATION_WINDOW_MS });
 }
 
-/** Records what the bot just sent (one entry per line, since a multi-line reply now goes out as
- * separate messages), so a later incoming echo of any of those lines can be recognized and ignored
- * as a trigger source. */
+/** Records what the bot just sent, so a later incoming echo of that message can be recognized and
+ * ignored as a trigger source. */
 function markSelfEcho(chatId, bodies) {
   const list = recentlySentByBot.get(chatId) || [];
   const expiresAt = Date.now() + SELF_ECHO_WINDOW_MS;
@@ -578,32 +650,18 @@ function consumeSelfEcho(chatId, body) {
   return true;
 }
 
-/** Splits a reply into non-empty lines — each one is sent as its own WhatsApp message. */
-function splitReplyLines(reply) {
-  return (reply || "").split("\n").map(l => l.trim()).filter(Boolean);
-}
-
-const MULTI_LINE_DELAY_MS = 500; // gap between bubbles so they read as separate messages, not a burst
-
-/** Sends a (possibly multi-line) reply as one message per line — quotes the original message on
- * the first line only; the rest are plain follow-ups in the same chat. */
+/** Sends a reply as a single WhatsApp message, quoting the original message. */
 async function sendReplyLines(ctx, msg, reply) {
-  const lines = splitReplyLines(reply);
-  for (let i = 0; i < lines.length; i++) {
-    if (i > 0) await new Promise(r => setTimeout(r, MULTI_LINE_DELAY_MS));
-    await (i === 0 ? msg.reply.text(lines[i]) : ctx.send.text(lines[i]));
-  }
-  return { lines };
+  const body = (reply || "").trim();
+  if (body) await msg.reply.text(body);
+  return { lines: [body] };
 }
 
 /** Same, but for unprompted sends (passive intervention) — no original message to quote. */
 async function sendBroadcastLines(ctx, reply) {
-  const lines = splitReplyLines(reply);
-  for (let i = 0; i < lines.length; i++) {
-    if (i > 0) await new Promise(r => setTimeout(r, MULTI_LINE_DELAY_MS));
-    await ctx.send.text(lines[i]);
-  }
-  return { lines };
+  const body = (reply || "").trim();
+  if (body) await ctx.send.text(body);
+  return { lines: [body] };
 }
 
 /**
@@ -742,10 +800,15 @@ async function checkGate(ctx, history, lang, dm, gateModel, aiName) {
  * messages that actually warrant a reply.
  */
 async function runPassiveCheck(ctx, chatId, history, t, senderName, { dm = false } = {}) {
-  // Re-check here, not just at the call site — a pending setTimeout could
-  // fire after the setting was flipped off in the meantime.
-  const passiveOn = await getSetting(ctx, "passiveIntervention", false);
-  if (!passiveOn) return;
+  // The passiveIntervention setting is about a GROUP deciding whether the
+  // bot may jump into a conversation uninvited — irrelevant in a DM, where
+  // every message is already addressed to it. Only gate on it for groups;
+  // re-checked here (not just at the call site) since a pending setTimeout
+  // could fire after the setting was flipped off in the meantime.
+  if (!dm) {
+    const passiveOn = await getSetting(ctx, "passiveIntervention", false);
+    if (!passiveOn) return;
+  }
 
   const { config } = ctx;
   const lang      = config.get("LANGUAGE", "pt");
@@ -765,6 +828,7 @@ async function runPassiveCheck(ctx, chatId, history, t, senderName, { dm = false
     extraInstructions: config.get("AI_EXTRA_INSTRUCTIONS", ""),
     language: lang,
     model: MODEL,
+    isGroup: !dm,
     settingsCommand: config.get("MANYAI_SETTINGS_COMMAND", "ai-settings"),
     cmdPrefix: config.get("CMD_PREFIX", "!"),
     emojis: config.get("AI_EMOJIS", false),
@@ -814,12 +878,11 @@ async function runPassiveCheck(ctx, chatId, history, t, senderName, { dm = false
  * (dm: true) is what keeps it from replying to every little thing.
  */
 async function maybeInterveneInDM(ctx, chatId, history, body, t, senderName) {
-  const passiveOn = await getSetting(ctx, "passiveIntervention", false);
   // A DM is already 1:1 with the bot — unlike the group's noise filter,
-  // don't drop short messages here; "oi"/"olá" deserve a real check.
-  if (!passiveOn || !body.trim()) {
-    return;
-  }
+  // don't drop short messages here; "oi"/"olá" deserve a real check. And
+  // unlike groups, this doesn't wait on the passiveIntervention setting —
+  // see runPassiveCheck.
+  if (!body.trim()) return;
   await runPassiveCheck(ctx, chatId, history, t, senderName, { dm: true });
 }
 
@@ -1022,6 +1085,7 @@ export default async function (ctx) {
     language: lang,
     model: MODEL,
     triggerKind,
+    isGroup: chat.isGroup,
     settingsCommand,
     cmdPrefix: config.get("CMD_PREFIX", "!"),
     emojis: config.get("AI_EMOJIS", false),
@@ -1046,6 +1110,11 @@ export default async function (ctx) {
       // extend it further, or the bot would keep answering the same
       // sender forever without ever being addressed again.
       if (triggerKind !== "continuation") markContinuation(chatId, msg.senderName);
+    } else {
+      // The AI was addressed but chose to stay quiet (e.g. a continuation
+      // follow-up that turned out not to be for it) — reset immediately
+      // instead of leaving the window open until it expires on its own.
+      pendingContinuation.delete(chatId);
     }
   } catch (err) {
     ctx.log.error(`[many-ai] error: ${err.message}`);

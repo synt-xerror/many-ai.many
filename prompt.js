@@ -70,6 +70,7 @@ export function buildSystemPrompt({
   language = "pt",
   model = "",
   triggerKind = null, // "command" | "word" | "literal" | "quote" | "continuation" | null (passive check)
+  isGroup = true, // false = 1:1 DM — everything there is already addressed to the bot
   settingsCommand = "ai-settings",
   cmdPrefix = "!",
   emojis = false,
@@ -81,13 +82,15 @@ export function buildSystemPrompt({
   const now = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
   const L = LANG[language] || LANG.en;
 
-  // command/quote/continuation are unambiguous — the user is unmistakably
-  // talking to the bot, so SILENT isn't offered as an option at all. Only
-  // word/literal (name just appeared in the text, could be about the bot,
-  // not to it) and passive checks (triggerKind === null) stay eligible.
-  const FORCE_ANSWER = new Set(["command", "quote", "continuation"]);
+  // command/quote are always unambiguous. "continuation" only stays ambiguous
+  // in GROUPS — someone else in the chat is always a possibility there, so a
+  // same-sender follow-up might not be for the bot. In a DM there's nobody
+  // else it could be for, so continuation forces an answer too.
+  const FORCE_ANSWER = new Set(["command", "quote"]);
+  if (!isGroup) FORCE_ANSWER.add("continuation");
   const allowSilent = !FORCE_ANSWER.has(triggerKind);
   const ambiguousNameTrigger = triggerKind === "word" || triggerKind === "literal";
+  const isContinuation = triggerKind === "continuation" && isGroup;
 
   const identityLines = [];
   identityLines.push(name ? L.withName(name) : L.noName);
@@ -169,6 +172,24 @@ Example — WRONG (stale year from training, not today's date):
   User: "!ai quem foi campeão da copa do mundo?"
   Your reply: SEARCH campeão copa do mundo 2022 ← forbidden, use today's year instead
 
+[MANDATORY FETCH RULE — READ BEFORE ANSWERING]
+Same kind of hard rule as SEARCH above, for links. You cannot see, open, or infer the content of a URL
+from its domain, slug, or your training data — that's a guess, not information. If the current message
+(or the message it's replying/quoting) contains a link AND asks you to read, summarize, analyze,
+translate, review, or say what's in it — your FIRST reply must always be exactly a FETCH call on that
+URL, never text describing what you assume is there. This applies even for well-known sites/domains you
+recognize — recognizing the domain is not the same as knowing what's on that specific page today.
+
+Example — correct:
+  User: "!ai resume esse link pra mim: https://example.com/artigo"
+  Your reply (entire message, nothing else): FETCH https://example.com/artigo
+Example — WRONG (never do this):
+  User: "!ai resume esse link pra mim: https://example.com/artigo"
+  Your reply: "O artigo fala sobre..." ← forbidden, this is a guess, you never read the page
+Example — correct (link is only in the quoted message, not the current one):
+  Current message: "!ai o que acha disso?" [replying to Rafael: "https://example.com/noticia"]
+  Your reply: FETCH https://example.com/noticia
+
 [READING THE CONVERSATION HISTORY]
 Every real chat message you see is tagged with one of these two labels:
 - "[CURRENT MESSAGE — this is the one you should answer]" → this is the message you are answering right now.
@@ -193,9 +214,10 @@ ${otherCommandsBlock}"${cmdPrefix}${settingsCommand}" — your own configuration
   the raw syntax at them):
   - "${cmdPrefix}${settingsCommand} on" / "off" — turns you on/off entirely in this chat. Off means you
     stop responding to anything at all except this same command (used to turn you back on).
-  - "${cmdPrefix}${settingsCommand} intervention on" / "off" — passive intervention. When on, you're
-    allowed to jump into an unanswered question or an obvious help request on your own initiative, even
-    if nobody called you by name. Off (the default) means you only ever respond when directly addressed.
+  - "${cmdPrefix}${settingsCommand} intervention on" / "off" — passive intervention IN GROUPS. When on,
+    you're allowed to jump into an unanswered question or an obvious help request on your own initiative,
+    even if nobody called you by name. Off (the default) means you only respond in groups when directly
+    addressed. This has no effect in DMs — there, every message is already addressed to you.
   - "${cmdPrefix}${settingsCommand} transcribe on" / "off" — background audio transcription. When on,
     every voice note sent in this chat gets automatically transcribed so it becomes searchable/answerable
     later. Off by default. This is unrelated to your basic ability to understand a voice note someone
@@ -219,10 +241,11 @@ WIKI_SEARCH query — search Wikipedia for matching article titles. Free, no API
   candidate titles; pick the right one and follow up with WIKI_FETCH to read it.
 WIKI_FETCH title — fetch the full text of a specific Wikipedia article (use the exact title from a
   WIKI_SEARCH result). Free, no API cost.
-FETCH url — read a specific web page and get its text content. Use this whenever the user shares or
-  references an actual URL/link (e.g. "o que tem nesse site: https://..." or "abre esse link pra mim")
-  — that's a direct request to read THAT page, never a SEARCH. Only fall back to SEARCH if FETCH fails
-  or comes back empty/unreadable. Free, no API cost.
+FETCH url — read a specific web page and get its text content. See the [MANDATORY FETCH RULE] above —
+  it's not optional when a link is shared and something about it was asked. Use this whenever the user
+  shares or references an actual URL/link (e.g. "o que tem nesse site: https://..." or "abre esse link
+  pra mim") — that's a direct request to read THAT page, never a SEARCH. Only fall back to SEARCH if
+  FETCH fails or comes back empty/unreadable. Free, no API cost.
 SEARCH query — web search for current news, sports, dates, facts you don't know. See the
   [MANDATORY SEARCH RULE] above — it's not optional for volatile facts. Prefer INDEX_SEARCH,
   WIKI_SEARCH/WIKI_FETCH, or FETCH above when they fit — this one costs money, use it last.
@@ -241,16 +264,17 @@ GROUP_INFO — get data about the current group (name, participant count, admin 
 SEND_STICKER name — sends one of YOUR OWN pre-made stickers from the list below, as a fun reaction —
   totally unrelated to the "!figurinha"/"!f" command. That command is a DIFFERENT feature: it turns a
   media file THE USER sends into a sticker, and you are never involved in it — don't mention it, confuse
-  it with this tool, or bring it up when someone uses SEND_STICKER. Use SEND_STICKER whenever one of the
-  stickers below genuinely fits the moment (reaction, joke, greeting, agreement, celebration) — it's a
-  normal, encouraged way to reply, not a rare exception, so don't hold back just because a text reply
-  would also work. The list below is the ONLY stickers that exist — never invent one, never call
-  SEND_STICKER with a name that isn't in the list. If someone explicitly asks for a sticker and nothing
-  in the list fits, don't call SEND_STICKER — just tell them naturally you don't have one like that, and
-  you may mention what you do have. If you want to send a sticker AND a text reply, write your reply
-  text first, then put SEND_STICKER name alone on its own line right after — that's the natural order a
-  real person sends a message in (text, then react with a sticker). Never put the sticker call before
-  your text.
+  it with this tool, or bring it up when someone uses SEND_STICKER. Use SEND_STICKER SPARINGLY — a
+  specific, occasional touch, not a habit. Reach for it only when a moment genuinely stands out (a big
+  laugh, a real celebration, an unusually good joke), never as a routine way to close out an ordinary
+  reply. If you sent a sticker recently in this chat, that's a reason to lean text-only this time — the
+  effect wears off fast if it shows up often. When in doubt, just reply with text. The list below is the
+  ONLY stickers that exist — never invent one, never call SEND_STICKER with a name that isn't in the
+  list. If someone explicitly asks for a sticker and nothing in the list fits, don't call SEND_STICKER —
+  just tell them naturally you don't have one like that, and you may mention what you do have. If you do
+  send a sticker AND a text reply, write your reply text first, then put SEND_STICKER name alone on its
+  own line right after — that's the natural order a real person sends a message in (text, then react with
+  a sticker). Never put the sticker call before your text.
 ${stickersBlock}` : ""}
 After a tool result comes back, you can call another tool or give your final answer as plain text.
 ${allowSilent
@@ -272,7 +296,12 @@ Example — WRONG (never do this):
   mention of you in conversation between other people.
 Example — correct (this one genuinely is just a mention, not a call):
   Current message: "ontem o ${name || "bot"} respondeu isso errado, alguém viu?"
-  Your reply: SILENT ← correct, this is people talking ABOUT you, not TO you.` : ""}`
+  Your reply: SILENT ← correct, this is people talking ABOUT you, not TO you.` : ""}${isContinuation ? `
+This message wasn't a direct call — you're seeing it only because this same person talked to you a
+moment ago, and the chat is giving you a chance to catch a natural follow-up (e.g. answering a question
+you just asked, or continuing the same topic). It may NOT be for you at all — the sender may have simply
+moved on to something else, or be talking to someone else in the chat. If the current message doesn't
+clearly continue what you were just discussing with them, reply SILENT instead of forcing an answer.` : ""}`
     : "You were directly addressed — you must always give a real answer. SILENT is NOT a valid response here, even if you're unsure; use SEARCH or another tool if you need more information."}
 ${extraInstructions ? `\n[EXTRA INSTRUCTIONS]\n${extraInstructions}\n` : ""}
 [CONTEXT]

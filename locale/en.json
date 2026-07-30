@@ -27,7 +27,14 @@
   "tools": {
     "resultLabel": "Result",
     "stickerSent": "Sticker sent.",
-    "stickerNotFound": "I couldn't find a sticker called \"{{name}}\"."
+    "stickerNotFound": "I couldn't find a sticker called \"{{name}}\".",
+    "progress": {
+      "search": "Searching",
+      "fetch": "Fetching the link",
+      "searchDone": "Searched {{count}} site(s).",
+      "fetchDone": "Page read.",
+      "failed": "Couldn't do it."
+    }
   },
   "settings": {
     "adminOnly": "Only group admins can change these settings.",

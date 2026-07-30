@@ -27,7 +27,14 @@
   "tools": {
     "resultLabel": "Resultado",
     "stickerSent": "Figurinha enviada.",
-    "stickerNotFound": "Não achei nenhuma figurinha chamada \"{{name}}\"."
+    "stickerNotFound": "Não achei nenhuma figurinha chamada \"{{name}}\".",
+    "progress": {
+      "search": "Pesquisando",
+      "fetch": "Acessando o link",
+      "searchDone": "Pesquisei em {{count}} site(s).",
+      "fetchDone": "Página lida.",
+      "failed": "Não consegui."
+    }
   },
   "settings": {
     "adminOnly": "Só admins do grupo podem mudar essas configurações.",

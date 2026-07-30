@@ -27,7 +27,14 @@
   "tools": {
     "resultLabel": "Resultado",
     "stickerSent": "Sticker enviado.",
-    "stickerNotFound": "No encontré ningún sticker llamado \"{{name}}\"."
+    "stickerNotFound": "No encontré ningún sticker llamado \"{{name}}\".",
+    "progress": {
+      "search": "Buscando",
+      "fetch": "Accediendo al enlace",
+      "searchDone": "Busqué en {{count}} sitio(s).",
+      "fetchDone": "Página leída.",
+      "failed": "No lo conseguí."
+    }
   },
   "settings": {
     "adminOnly": "Solo los admins del grupo pueden cambiar estas configuraciones.",
